@@ -1,0 +1,7 @@
+[project]
+name = "arch-setup-script"
+version = "0.1.0"
+description = "This is my arch setup script, it installs the packages I need and configures my system for my personal use. It doesn´t take care about the installation of arch itself."
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = []

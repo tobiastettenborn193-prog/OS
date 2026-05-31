@@ -66,8 +66,8 @@ file_manager = "thunar"
 
 failed_packages = []
 
-before_download = ["networkmanager", "flatpak", "git", "base-devel", "archlinux-keyring"]
-download_list = [terminal, browser, power_menu, application_launcher, file_manager, "picom", "lib32-libva-mesa-driver", "libva-mesa-driver", "lib32-vulkan-radeon", "vulkan-radeon", "xf86-video-amdgpu", "xorg-server", "xorg-xinit", "mesa", "xf86-input-libinput", "python", "uv", "cargo", "rust-analyzer", "windsurf", "steam", "vesktop", "qtile", "pipewire", "pipewire-pulse", "pipewire-alsa", "pipewire-jack", "htop", "fastfetch", "spectacle", "dunst", "feh", "polkit-gnome", "wireplumber", "pavucontrol", "ttf-jetbrains-mono-nerd", "unzip", "python-pywal"]
+before_download = ["networkmanager", "git", "base-devel", "archlinux-keyring", "rust", "cargo"]
+download_list = [terminal, browser, power_menu, application_launcher, file_manager, "picom", "lib32-libva-mesa-driver", "libva-mesa-driver", "lib32-vulkan-radeon", "vulkan-radeon", "xf86-video-amdgpu", "xorg-server", "xorg-xinit", "mesa", "xf86-input-libinput", "python", "uv", "nano", "rust-analyzer", "windsurf", "steam", "vesktop", "qtile", "pipewire", "pipewire-pulse", "pipewire-alsa", "pipewire-jack", "htop", "fastfetch", "spectacle", "dunst", "feh", "polkit-gnome", "wireplumber", "pavucontrol", "ttf-jetbrains-mono-nerd", "unzip", "python-pywal"]
 
 #<<<-----------------------------------------------------------FUNCTIONS---------------------------------------------------------->>>
 
@@ -89,7 +89,6 @@ def smart_download_package(package):
         print(f"Pacman failed for {package}. Trying yay...")
 
     try:
-        # Fixed: build as tobster, not nobody
         execute_command(f"su - tobster -c 'yay -S --needed --noconfirm {package}'")
         print(f"-> {package} successfully installed via yay.")
         return
@@ -122,7 +121,6 @@ def pacman_install(package):
 # FUNCTION WHICH INSTALLS A PACKAGE USING YAY
 def yay_install(package):
     try:
-        # Fixed: build as tobster, not nobody
         execute_command(f"su - tobster -c 'yay -S --needed --noconfirm {package}'")
     except subprocess.CalledProcessError:
         print(f"Yay failed for {package}.")
@@ -151,9 +149,7 @@ def install_before_packages():
     print("\nBuilding yay manually from AUR...")
     try:
         execute_command("git clone https://aur.archlinux.org/yay.git /tmp/yay")
-        # Fixed: chown to tobster (real user) instead of nobody
         execute_command("chown -R tobster:tobster /tmp/yay")
-        # Fixed: build as tobster with su instead of nobody
         execute_command("su - tobster -c 'cd /tmp/yay && makepkg -si --noconfirm'")
         print("-> yay successfully installed.")
     except subprocess.CalledProcessError:
@@ -176,14 +172,16 @@ def qtile_config():
     execute_command("mkdir -p /home/tobster/.wallpapers")
     execute_command("chown -R tobster:tobster /home/tobster/.config /home/tobster/.wallpapers")
 
-# FUNCTION WHICH ENABLES THE MULTILIB REPOSITORY AND CREATES THE USER
+# FUNCTION WHICH ENABLES THE MULTILIB REPOSITORY, FLATPAK, AND CREATES THE USER
 def setup_system_basics():
     try:
         execute_command("sed -i '/\\[multilib\\]/,+1 s/^#//' /etc/pacman.conf")
-        execute_command("pacman -Sy") 
-        print("-> Multilib repository enabled.")
+        execute_command("pacman -Sy")
+        execute_command("pacman -S --needed --noconfirm flatpak")
+        execute_command("flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo")
+        print("-> Multilib + Flathub enabled.")
     except subprocess.CalledProcessError:
-        print("Failed to enable multilib repository.")
+        print("Failed to enable multilib/flatpak.")
 
     try:
         execute_command("useradd -m -G wheel -s /bin/bash tobster")
@@ -217,7 +215,6 @@ def detect_wifi_interface():
         output = execute_command("ip link show")
         interface = None
         for line in output.splitlines():
-            # look for wlan* or wlp* interfaces
             if ": wlan" in line or ": wlp" in line:
                 interface = line.split(": ")[1].split(":")[0].strip()
                 break
@@ -235,6 +232,9 @@ def detect_wifi_interface():
 def autostart():
     autostart_path = "/home/tobster/.config/qtile/autostart.sh"
     autostart_content = """#!/bin/bash
+pipewire &
+pipewire-pulse &
+wireplumber &
 while true; do picom --config ~/.config/picom/picom.conf; sleep 1; done &
 """
 
@@ -243,7 +243,6 @@ while true; do picom --config ~/.config/picom/picom.conf; sleep 1; done &
 
     execute_command(f"chmod +x {autostart_path}")
     
-    # Configure .xinitrc so startx loads Qtile automatically
     try:
         with open("/home/tobster/.xinitrc", "w") as f:
             f.write("exec qtile start\n")

@@ -13,9 +13,9 @@ system_name = "Arch"
 #profile name
 profile_name = "tobster"
 #profile password
-profile_password = "password"
+profile_password = "1903"
 #root password
-root_password = "password"
+root_password = "1903.Tt."
 #keyboard layout
 keyboard_layout = "de-latin1"
 #timezone

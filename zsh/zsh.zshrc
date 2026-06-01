@@ -9,8 +9,10 @@ export PATH="$HOME/.local/bin:$PATH"
 export PATH="$HOME/.local/npm-global/bin:$PATH"
 
 alias sounddriver-restart='systemctl --user restart pipewire pipewire-pulse wireplumber'
-alias aliasconf='sudo nano ~/.zshrc'
+alias zshconf='sudo nano ~/.zshrc'
 alias fastf ='fastfetch'
+alias qtileconf='sudo nano ~/.config/qtile/config.py'
+alias qtilerestart='qtile cmd-obj -o cmd -f restart'
 alias pacinstall='sudo pacman -S'
 alias flatinstall='sudo flatpak install'
 alias pacuninstall='sudo pacman -R'
@@ -84,3 +86,4 @@ else:
 print(formatted)
 "
 }
+eval "$(starship init zsh)"s

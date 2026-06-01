@@ -57,11 +57,26 @@ wintypes:
 };
 """
 
+picom_service_content = """[Unit]
+Description=Picom compositor
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/picom --config %h/.config/picom/picom.conf
+Restart=on-failure
+RestartSec=2s
+
+[Install]
+WantedBy=graphical-session.target
+"""
+
+# Picom wird jetzt via systemd user service gestartet, nicht mehr hier
 autostart_content = """#!/bin/bash
 pipewire &
 pipewire-pulse &
 wireplumber &
-while true; do picom --config ~/.config/picom/picom.conf; sleep 1; done &
 """
 
 xinitrc_content = """#!/bin/bash
@@ -72,14 +87,105 @@ xhost +local: &> /dev/null
 exec qtile start
 """
 
-# pywal postscript — written to ~/.config/wal/postscripts/qtile_reload.sh
-# Triggers reload_wal_colors() in the qtile config via IPC after every wal run
+# pywal postscript — triggers reload_wal_colors() in qtile via IPC after every wal run
 wal_postscript_content = """#!/bin/bash
 sleep 0.3
 qtile cmd-obj -o cmd -f execute_custom_command -a "reload_wal_colors" 2>/dev/null
 if [ $? -ne 0 ]; then
     qtile-cmd -o cmd -f execute_custom_command -a "reload_wal_colors" 2>/dev/null
 fi
+"""
+
+# pywal postscript — rewrites the starship palette section after every wal run
+starship_wal_postscript_content = """#!/bin/bash
+source ~/.cache/wal/colors.sh
+
+cat > ~/.config/starship_palette.toml << EOF
+[palettes.wal]
+color0 = "$color0"
+color1 = "$color1"
+color2 = "$color2"
+color3 = "$color3"
+color4 = "$color4"
+color5 = "$color5"
+color6 = "$color6"
+color7 = "$color7"
+EOF
+"""
+
+# Main starship config — palette is loaded from starship_palette.toml via !include
+starship_content = """
+"$schema" = 'https://starship.rs/config-schema.json'
+
+palette = "wal"
+
+# Palette wird von ~/.config/wal/postscripts/starship_reload.sh nach jedem wal-Run neu geschrieben
+[palettes.wal]
+color0 = "#1a1a2e"
+color1 = "#e06c75"
+color2 = "#98c379"
+color3 = "#e5c07b"
+color4 = "#61afef"
+color5 = "#c678dd"
+color6 = "#56b6c2"
+color7 = "#abb2bf"
+
+format = \"\"\"
+[┌─](color7)$directory$git_branch$git_status$git_metrics
+[└─](color7)$python$rust$nodejs$cmd_duration$character\"\"\"
+
+[directory]
+style = "bold color4"
+truncation_length = 3
+truncate_to_repo = true
+format = "[ $path ]($style)[$read_only]($read_only_style) "
+
+[git_branch]
+symbol = " "
+style = "color5"
+format = "[on](color7) [$symbol$branch]($style) "
+
+[git_status]
+style = "color1"
+format = '([$all_status$ahead_behind]($style) )'
+conflicted = "⚡"
+ahead = "⇡${count}"
+behind = "⇣${count}"
+diverged = "⇕⇡${ahead_count}⇣${behind_count}"
+modified = "✎${count}"
+untracked = "?${count}"
+staged = "+${count}"
+deleted = "✘${count}"
+
+[git_metrics]
+added_style = "color2"
+deleted_style = "color1"
+format = '([+$added]($added_style) )([-$deleted]($deleted_style) )'
+disabled = false
+
+[python]
+symbol = " "
+style = "color3"
+format = '[${symbol}${pyenv_prefix}(${version} )(\($virtualenv\) )]($style)'
+
+[rust]
+symbol = " "
+style = "color1"
+format = '[$symbol($version )]($style)'
+
+[nodejs]
+symbol = " "
+style = "color2"
+format = '[$symbol($version )]($style)'
+
+[cmd_duration]
+min_time = 2_000
+style = "color3"
+format = "[⏱ $duration]($style) "
+
+[character]
+success_symbol = "[❯](color2)"
+error_symbol = "[❯](color1)"
 """
 
 timeout = 300
@@ -155,12 +261,14 @@ def install_before_packages():
         pacman_install(package)
     print("\nBuilding yay manually from AUR...")
     try:
+        execute_command("rm -rf /tmp/yay")
         execute_command("git clone https://aur.archlinux.org/yay.git /tmp/yay")
         execute_command("chown -R tobster:tobster /tmp/yay")
-        execute_command("su - tobster -c 'cd /tmp/yay && makepkg -si --noconfirm'")
+        # HOME explizit setzen, da su in subprocess manchmal /root erbt
+        execute_command("su - tobster -c 'cd /tmp/yay && HOME=/home/tobster makepkg -si --noconfirm'")
         print("-> yay successfully installed.")
-    except subprocess.CalledProcessError:
-        print("Critical error: yay could not be built.")
+    except subprocess.CalledProcessError as e:
+        print(f"Critical error: yay could not be built. {e.stderr}")
         failed_packages.append("yay")
 
 def install_packages():
@@ -206,6 +314,15 @@ def picom_config():
     execute_command("chown -R tobster:tobster /home/tobster/.config/picom")
     print("-> Picom configuration installed.")
 
+def picom_service():
+    service_dir = "/home/tobster/.config/systemd/user"
+    execute_command(f"mkdir -p {service_dir}")
+    with open(f"{service_dir}/picom.service", "w") as f:
+        f.write(picom_service_content)
+    execute_command("su - tobster -c 'systemctl --user enable picom.service'")
+    execute_command("chown -R tobster:tobster /home/tobster/.config/systemd")
+    print("-> Picom systemd user service installed & enabled.")
+
 def detect_wifi_interface():
     print("\nDetecting WiFi interface...")
     try:
@@ -231,7 +348,6 @@ def autostart():
         f.write(autostart_content)
     execute_command(f"chmod +x {autostart_path}")
 
-    # .xinitrc
     try:
         with open("/home/tobster/.xinitrc", "w") as f:
             f.write(xinitrc_content)
@@ -240,16 +356,59 @@ def autostart():
     except Exception as e:
         print(f"Failed to create .xinitrc: {e}")
 
-    # pywal postscript for live qtile color reload
-    postscript_dir  = "/home/tobster/.config/wal/postscripts"
-    postscript_path = f"{postscript_dir}/qtile_reload.sh"
+    postscript_dir = "/home/tobster/.config/wal/postscripts"
     execute_command(f"mkdir -p {postscript_dir}")
-    with open(postscript_path, "w") as f:
+
+    with open(f"{postscript_dir}/qtile_reload.sh", "w") as f:
         f.write(wal_postscript_content)
-    execute_command(f"chmod +x {postscript_path}")
-    print("-> pywal postscript installed.")
+    execute_command(f"chmod +x {postscript_dir}/qtile_reload.sh")
+    print("-> pywal postscript (qtile) installed.")
+
+    with open(f"{postscript_dir}/starship_reload.sh", "w") as f:
+        f.write(starship_wal_postscript_content)
+    execute_command(f"chmod +x {postscript_dir}/starship_reload.sh")
+    print("-> pywal postscript (starship) installed.")
 
     execute_command("chown -R tobster:tobster /home/tobster")
+
+def setup_pipewire():
+    execute_command("systemctl enable pipewire.service")
+    execute_command("systemctl enable pipewire-pulse.service")
+    execute_command("systemctl enable wireplumber.service")
+    print("-> Pipewire services enabled.")
+
+def setup_zsh():
+    execute_command("cp /home/tobster/OS/zsh/zsh.zshrc /home/tobster/.zshrc")
+    execute_command("chown tobster:tobster /home/tobster/.zshrc")
+    print("-> Zsh configured.")
+
+def setup_starship():
+    config_dir = "/home/tobster/.config"
+    execute_command(f"mkdir -p {config_dir}")
+    with open(f"{config_dir}/starship.toml", "w") as f:
+        f.write(starship_content)
+    execute_command(f"chown tobster:tobster {config_dir}/starship.toml")
+    print("-> Starship configured (pywal palette will update on first wal run).")
+
+
+def load_wallpapers_to_folders():
+    execute_command("mkdir -p /home/tobster/.wallpapers")
+    execute_command("git clone https://github.com/phenax/wallpapers.git /home/tobster/.wallpapers")
+    print("-> Wallpapers loaded.")
+
+def setup_bluetooth():
+    execute_command("systemctl enable bluetooth.service")
+    print("-> Bluetooth service enabled.")
+
+
+def setup_networkmanager():
+    execute_command("systemctl enable NetworkManager.service")
+    print("-> NetworkManager service enabled.")
+
+def setup_ly():
+    pacman_install("ly")
+    execute_command("systemctl enable ly.service")
+    print("-> Ly display manager enabled.")
 
 #<<<-----------------------------------------------------------MAIN---------------------------------------------------------->>>
 
@@ -260,13 +419,21 @@ def main():
     qtile_config()
     detect_wifi_interface()
     picom_config()
+    load_wallpapers_to_folders()
+    picom_service()
+    setup_pipewire()
+    setup_bluetooth()
+    setup_networkmanager()
+    setup_ly()
+    setup_zsh()
+    setup_starship()
     autostart()
     
     print("\n--- Process Finished ---")
     if failed_packages:
         print(f"Failed to install: {', '.join(failed_packages)}")
     else:
-        print("Everything successfully installed! Log in as 'tobster' and type 'startx'")
+        print("Everything successfully installed! Reboot and log in via Ly.")
 
 if __name__ == "__main__":
     main()

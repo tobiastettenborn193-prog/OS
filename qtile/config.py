@@ -56,21 +56,15 @@ _raw_colors, _raw_special = _load_wal()
 PALETTE = _build_palette(_raw_colors, _raw_special)
 
 # ── Live color-reload ──────────────────────────────────────────────────────────
-#
-# Called from the pywal postscript via:
-#   qtile cmd-obj -o cmd -f execute_custom_command -a "reload_wal_colors"
-#
-# We store widget references in a module-level dict so the function can reach them.
 _LIVE_WIDGETS: dict = {}
 
 def reload_wal_colors(qtile=None):
     """Re-read ~/.cache/wal/colors.json and push new colors to every bar widget."""
     raw_c, raw_s = _load_wal()
     p = _build_palette(raw_c, raw_s)
-    PALETTE.update(p)                       # keep module palette in sync
+    PALETTE.update(p)
 
     mapping = {
-        # widget key         : (attr,        new value)
         "groupbox":          [("active",      p["fg"]),
                               ("inactive",    p["muted"]),
                               ("this_current_screen_border", p["accent"]),
@@ -114,7 +108,19 @@ def reload_wal_colors(qtile=None):
         except Exception:
             pass
 
-    # Redraw bar background color
+    # Layout borders live updaten
+    try:
+        instance = qtile or _qtile_instance
+        for group in instance.groups:
+            for lay in group.layouts:
+                if hasattr(lay, 'border_focus'):
+                    lay.border_focus = p["accent"]
+                if hasattr(lay, 'border_normal'):
+                    lay.border_normal = p["muted"]
+    except Exception:
+        pass
+
+    # Bar background
     try:
         bg_with_alpha = p["bg"] + "E6"
         for screen in (qtile or _qtile_instance).screens:
@@ -134,7 +140,6 @@ def change_wallpaper(qtile=None):
     if not files:
         return
     full_path = os.path.join(wall_dir, random.choice(files))
-    # wal will run the postscript after generating colors → triggers reload_wal_colors
     subprocess.Popen(["wal", "-i", full_path])
 
 def safe_restart(qtile):
@@ -175,7 +180,6 @@ keys = [
     Key([mod], "F12",           lazy.group["scratchpad"].dropdown_toggle("term")),
     Key([fn], "w",              lazy.function(change_wallpaper)),
 
-    # Manual live-reload shortcut (in case you run wal from terminal yourself)
     Key([fn, "shift"], "r",     lazy.function(reload_wal_colors), desc="Reload wal colors live"),
 ]
 
@@ -238,7 +242,6 @@ def _icon(key, text, color_key):
 def set_bar():
     p = PALETTE
 
-    # GroupBox
     gbox = widget.GroupBox(
         font=FONT, fontsize=FSIZE, padding=6, borderwidth=2,
         highlight_method="line",
@@ -255,53 +258,45 @@ def set_bar():
     )
     _LIVE_WIDGETS["groupbox"] = gbox
 
-    # Window title
     wname = widget.WindowName(
         font=FONT, fontsize=FSIZE, foreground=p["muted"],
         max_chars=40, empty_group_string="",
     )
     _LIVE_WIDGETS["windowname"] = wname
 
-    # Clock (time)
     clk_time = widget.Clock(
         format="%H:%M", font=FONT, fontsize=16,
         foreground=p["accent"], padding=0,
     )
     _LIVE_WIDGETS["clock_time"] = clk_time
 
-    # Clock separator dot
     clk_sep = widget.TextBox(
         text="  ", font=FONT, fontsize=FSIZE,
         foreground=p["muted"], padding=0,
     )
     _LIVE_WIDGETS["clock_sep"] = clk_sep
 
-    # Clock (date)
     clk_date = widget.Clock(
         format="%a %d.%m.%Y", font=FONT, fontsize=FSIZE,
         foreground=p["muted"], padding=0,
     )
     _LIVE_WIDGETS["clock_date"] = clk_date
 
-    # CPU
     cpu = widget.CPU(
         font=FONT, fontsize=FSIZE, foreground=p["warn"],
         format="{load_percent:.0f}%", update_interval=2, padding=0,
     )
     _LIVE_WIDGETS["cpu"] = cpu
 
-    # Memory
     mem = widget.Memory(
         font=FONT, fontsize=FSIZE, foreground=p["purple"],
         format="{MemPercent:.0f}%", update_interval=2, padding=0,
     )
     _LIVE_WIDGETS["mem"] = mem
 
-    # Volume
     vol = widget.Volume(font=FONT, fontsize=FSIZE, foreground=p["fg"], padding=0)
     _LIVE_WIDGETS["vol"] = vol
 
-    # WiFi
     wifi = widget.Wlan(
         interface="wlan0", format="{essid}",
         disconnected_message="offline",
@@ -309,7 +304,6 @@ def set_bar():
     )
     _LIVE_WIDGETS["wifi"] = wifi
 
-    # Battery
     bat = widget.Battery(
         font=FONT, fontsize=FSIZE,
         format="{char} {percent:2.0%}",
@@ -329,11 +323,8 @@ def set_bar():
     wifi_icon   = _icon("wifi_icon",   "󰤨",   "good")
 
     blocks = (
-        # ── LEFT ─────────────────────────────────────────
         [_gap(10), gbox, _gap(6), _pipe("sep_title"), _gap(6), wname]
-        # ── CENTER ───────────────────────────────────────
         + [widget.Spacer(), clk_time, clk_sep, clk_date, widget.Spacer()]
-        # ── RIGHT ────────────────────────────────────────
         + [
             notif_icon,         _pipe("sep_notif"),
             cpu_icon, cpu,      _gap(4),

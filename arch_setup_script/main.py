@@ -106,7 +106,7 @@ def smart_download_package(package):
         print(f"Flatpak installation failed for {package}.")
         
     failed_packages.append(package)
-    print(f"❌ Error: '{package}' could not be installed anywhere.")
+    print(f"Error: '{package}' could not be installed anywhere.")
 
 
 # FUNCTION WHICH INSTALLS A PACKAGE USING PACMAN

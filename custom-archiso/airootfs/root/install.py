@@ -1,7 +1,7 @@
 #<<<--------------------------------------------------------------IMPORTS------------------------------------------------------------>>>>
 import subprocess
 import sys
-import os 
+import os
 
 #<<<--------------------------------------------------------------HYPERPARAMETERS------------------------------------------------------------>>>>
 
@@ -11,18 +11,31 @@ Timeout = 300
 #system name
 system_name = "Arch"
 #profile name
-profile_name = "tobster"
+profile_name = "username"
 #profile password
-profile_password = "1903"
+profile_password = "YourPassword123!"
 #root password
-root_password = "1903.Tt."
+root_password = "YourRootPassword123!"
 #keyboard layout
 keyboard_layout = "de-latin1"
 #timezone
 timezone = "Europe/Berlin"
-#DRIVE
-Drive = "/dev/sda"
 
+#<<<--------------------------------------------------------------DISK SELECTION------------------------------------------------------------>>>>
+
+##########Scan available disks and ask user which one to use
+print("---------------Scanning available disks---------------------")
+result = subprocess.run("lsblk -d -n -o NAME,SIZE,MODEL", shell=True, capture_output=True, text=True)
+print(result.stdout)
+
+Drive = input("Welches Laufwerk soll verwendet werden? (z.B. /dev/sda): ").strip()
+
+if not Drive.startswith("/dev/"):
+    Drive = f"/dev/{Drive}"
+
+print(f"Selected drive: {Drive}")
+print("---------------Disk selected---------------------")
+print("\n"*2)
 
 #Partitions
 if "nvme" in Drive:
@@ -72,7 +85,8 @@ def setup_base_system():
     print("---------------Partitions mounted---------------------")
     print("\n"*2)
     print("---------------Installing base system---------------------")
-    execute_command(f"pacstrap /mnt base base-devel linux linux-firmware networkmanager nano sudo python uv git --noconfirm")
+    # FIX: pacstrap benutzt kein --noconfirm, und -K initialisiert den Keyring korrekt
+    execute_command(f"pacstrap -K /mnt base base-devel linux linux-firmware networkmanager nano sudo python git")
     print("---------------Base system installed---------------------")
     print("\n"*2)
     print("---------------Generating fstab---------------------")
@@ -86,7 +100,7 @@ def setup_base_system():
 def configure_chroot():
     print("---------------Configuring chroot---------------------")
     chroot_script = f"""#!/bin/bash
-set -e
+set -ex
 
 # Zeitzone
 ln -sf /usr/share/zoneinfo/{timezone} /etc/localtime
@@ -104,8 +118,10 @@ echo "{system_name}" > /etc/hostname
 # Root Passwort setzen
 echo "root:{root_password}" | chpasswd
 
-# User erstellen
-useradd -m -G wheel -s /bin/bash {profile_name}
+# User erstellen (nur wenn noch nicht vorhanden)
+if ! id "{profile_name}" &>/dev/null; then
+    useradd -m -G wheel -s /bin/bash {profile_name}
+fi
 echo "{profile_name}:{profile_password}" | chpasswd
 
 # Sudo fuer wheel-Gruppe aktivieren
@@ -114,19 +130,26 @@ sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
 # Netzwerk aktivieren
 systemctl enable NetworkManager
 
+# Keyring initialisieren (wichtig fuer pacman im chroot)
+pacman-key --init
+pacman-key --populate archlinux
+
 # Bootloader (GRUB) installieren
 pacman -S --noconfirm grub efibootmgr
 grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB
 grub-mkconfig -o /boot/grub/grub.cfg
 """
-    
-    chroot_script_path = "/mnt/tmp/chroot_setup.sh"
-    with open(chroot_script_path, "w") as f:
+
+    # FIX: /mnt/root verwenden statt /mnt/tmp (tmp kann noexec sein)
+    execute_command("mkdir -p /mnt/root")
+    chroot_script_path = "/mnt/root/chroot_setup.sh"
+    # FIX: newline="\n" verhindert Windows CRLF Zeilenenden
+    with open(chroot_script_path, "w", newline="\n") as f:
         f.write(chroot_script)
-        
+
     execute_command(f"chmod +x {chroot_script_path}")
-    execute_command(f"arch-chroot /mnt /tmp/chroot_setup.sh")
-    execute_command(f"rm {chroot_script_path}")
+    execute_command(f"arch-chroot /mnt /root/chroot_setup.sh")
+    execute_command("rm /mnt/root/chroot_setup.sh")
     print("---------------Chroot configured---------------------")
     print("\n"*2)
     print("="*50)
@@ -135,22 +158,9 @@ grub-mkconfig -o /boot/grub/grub.cfg
     print("\n"*2)
 
 def finalize_installation():
-    """
-    Handles the transition into the newly installed system.
-    Copies the setup script, opens an interactive chroot environment, 
-    and securely unmounts the drives once the user is done.
-    """
-    print("---------------Copying setup script to the new system---------------------")
-    
-    execute_command("cp /root/setup.py /mnt/root/")
-    
-    print("\n" + "="*50)
-    print("BASE SYSTEM INSTALLATION COMPLETE!")
-    print("="*50 + "\n")
-    
     print("\n---------------Cleaning up and unmounting partitions---------------------")
     execute_command("umount -R /mnt")
-    
+
     print("---------------Installation entirely complete!---------------------")
     print("\n"*2)
     print("You can now safely type 'reboot' to restart your PC.")

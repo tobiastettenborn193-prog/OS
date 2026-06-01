@@ -1,184 +1,208 @@
-"""<<< ---------------------------------------------------- SETUP ---------------------------------------------------- >>>"""
- 
-"""
-Execute the command "mkdir -p ~/.config/qtile" to create the qtile configuration directory.
-Then copy this file to ~/.config/qtile/config.py
-Execute the command "chmod +x ~/.config/qtile/config.py" to make the file executable.
-Finally, restart qtile with "qtile restart".
-"""
- 
 """<<< --------------------------------------------------- IMPORTS --------------------------------------------------- >>>"""
- 
+
 import os
 import json
 import random
 import subprocess
-from libqtile import layout, widget, bar, hook
+from libqtile import layout, widget, bar, hook, qtile as _qtile_instance
 from libqtile.config import Group, Key, Screen, ScratchPad, DropDown, Match, Drag, Click
 try:
-    from libqtile.lazy import lazy          # Qtile 0.21+
+    from libqtile.lazy import lazy
 except ImportError:
-    from libqtile.command import lazy       # Qtile <= 0.20
- 
+    from libqtile.command import lazy
+
 """<<< ----------------------------------------------- HYPERPARAMETERS ----------------------------------------------- >>>"""
- 
-# superkey
-mod = "mod4"
-# alt key
-fn = "mod1"
-# hash symbol bypass (avoids f-string issues)
+
+mod  = "mod4"
+fn   = "mod1"
 hash_sym = chr(35)
- 
-# terminal
-terminal = "alacritty"
-# browser
-browser = "zen-browser"
-# file manager
-file_manager = "thunar"
-# screenshot
-screenshot_tool = "spectacle"
-# power menu
-power_menu = "eww"
-# application launcher
+
+terminal             = "alacritty"
+browser              = "zen-browser"
+file_manager         = "thunar"
+screenshot_tool      = "spectacle"
+power_menu           = "eww"
 application_launcher = "rofi"
-# background manager
-background_manager = "feh"
- 
+
+"""<<< ---------------------------------------------------- PYWAL ---------------------------------------------------- >>>"""
+
+WAL_FILE = os.path.expanduser("~/.cache/wal/colors.json")
+
+def _load_wal():
+    """Load pywal colors from cache. Returns (colors_dict, special_dict)."""
+    if os.path.exists(WAL_FILE):
+        try:
+            with open(WAL_FILE) as f:
+                wal = json.load(f)
+            return wal.get("colors", {}), wal.get("special", {})
+        except (json.JSONDecodeError, KeyError, OSError):
+            pass
+    return {}, {}
+
+def _build_palette(colors, special):
+    """Turn raw wal dicts into named aliases used by the bar."""
+    bg     = special.get("background", colors.get("color0",  "#1a1a2e"))
+    fg     = special.get("foreground", colors.get("color7",  "#abb2bf"))
+    accent = colors.get("color4",  "#61afef")   # blue  — active group / clock
+    muted  = colors.get("color8",  "#3e4452")   # gray  — separators / inactive
+    good   = colors.get("color2",  "#98c379")   # green — battery / wifi
+    warn   = colors.get("color3",  "#e5c07b")   # amber — cpu / mem
+    alert  = colors.get("color1",  "#e06c75")   # red   — low battery / urgent
+    purple = colors.get("color5",  "#c678dd")   # purple— layout / ram
+    return dict(bg=bg, fg=fg, accent=accent, muted=muted,
+                good=good, warn=warn, alert=alert, purple=purple)
+
+_raw_colors, _raw_special = _load_wal()
+PALETTE = _build_palette(_raw_colors, _raw_special)
+
+# ── Live color-reload ──────────────────────────────────────────────────────────
+#
+# Called from the pywal postscript via:
+#   qtile cmd-obj -o cmd -f execute_custom_command -a "reload_wal_colors"
+#
+# We store widget references in a module-level dict so the function can reach them.
+_LIVE_WIDGETS: dict = {}
+
+def reload_wal_colors(qtile=None):
+    """Re-read ~/.cache/wal/colors.json and push new colors to every bar widget."""
+    raw_c, raw_s = _load_wal()
+    p = _build_palette(raw_c, raw_s)
+    PALETTE.update(p)                       # keep module palette in sync
+
+    mapping = {
+        # widget key         : (attr,        new value)
+        "groupbox":          [("active",      p["fg"]),
+                              ("inactive",    p["muted"]),
+                              ("this_current_screen_border", p["accent"]),
+                              ("other_current_screen_border", p["purple"]),
+                              ("this_screen_border", p["muted"]),
+                              ("urgent_border", p["alert"])],
+        "windowname":        [("foreground",  p["muted"])],
+        "clock_time":        [("foreground",  p["accent"])],
+        "clock_sep":         [("foreground",  p["muted"])],
+        "clock_date":        [("foreground",  p["muted"])],
+        "cpu_icon":          [("foreground",  p["warn"])],
+        "cpu":               [("foreground",  p["warn"])],
+        "mem_icon":          [("foreground",  p["purple"])],
+        "mem":               [("foreground",  p["purple"])],
+        "vol_icon":          [("foreground",  p["fg"])],
+        "vol":               [("foreground",  p["fg"])],
+        "wifi_icon":         [("foreground",  p["good"])],
+        "wifi":              [("foreground",  p["good"])],
+        "bat":               [("foreground",  p["good"]),
+                              ("low_foreground", p["alert"])],
+        "sep_notif":         [("foreground",  p["muted"])],
+        "sep_res":           [("foreground",  p["muted"])],
+        "sep_vol":           [("foreground",  p["muted"])],
+        "sep_wifi":          [("foreground",  p["muted"])],
+        "sep_bat":           [("foreground",  p["muted"])],
+        "sep_layout":        [("foreground",  p["muted"])],
+        "notif_icon":        [("foreground",  p["muted"])],
+    }
+
+    for key, attrs in mapping.items():
+        w = _LIVE_WIDGETS.get(key)
+        if w is None:
+            continue
+        for attr, value in attrs:
+            try:
+                setattr(w, attr, value)
+            except Exception:
+                pass
+        try:
+            w.draw()
+        except Exception:
+            pass
+
+    # Redraw bar background color
+    try:
+        bg_with_alpha = p["bg"] + "E6"
+        for screen in (qtile or _qtile_instance).screens:
+            if screen.top:
+                screen.top.background = bg_with_alpha
+                screen.top.draw()
+    except Exception:
+        pass
+
 """<<< -------------------------------------------------- FUNCTIONS -------------------------------------------------- >>>"""
- 
+
 def change_wallpaper(qtile=None):
+    """Pick a random wallpaper, run pywal. The postscript handles color reload."""
     wall_dir = os.path.expanduser("~/.wallpapers")
     os.makedirs(wall_dir, exist_ok=True)
- 
     files = [f for f in os.listdir(wall_dir) if f.lower().endswith(('.jpg', '.png', '.jpeg'))]
     if not files:
         return
- 
-    wallpaper_choice = random.choice(files)
-    full_path = os.path.join(wall_dir, wallpaper_choice)
-
-    # Fixed: just set the wallpaper directly without reloading the entire config
+    full_path = os.path.join(wall_dir, random.choice(files))
+    # wal will run the postscript after generating colors → triggers reload_wal_colors
     subprocess.Popen(["wal", "-i", full_path])
- 
- 
+
 def safe_restart(qtile):
-    """
-    Version-safe restart: tries reload_config() first (Qtile 0.21+),
-    falls back to restart() for older versions.
-    """
     try:
         qtile.reload_config()
     except AttributeError:
         qtile.restart()
- 
+
 """<<< ------------------------------------------------- KEYBINDINGS ------------------------------------------------- >>>"""
- 
+
 keys = [
- 
-    # -------- Applications --------
- 
-    # Launch terminal
-    Key([mod], "Return", lazy.spawn(terminal), desc="Launch terminal"),
-    # Launch browser
-    Key([mod], "BackSpace", lazy.spawn(browser), desc="Launch browser"),
-    # Launch file manager
-    Key([mod], "f", lazy.spawn(file_manager), desc="Launch file manager"),
-    # Launch power menu
-    Key([mod, fn], "p", lazy.spawn(power_menu), desc="Launch power menu"),
-    # Launch screenshot tool
-    Key([fn], "p", lazy.spawn(screenshot_tool), desc="Launch screenshot tool"),
-    # Launch color scenario (pywal)
-    Key([fn, "shift"], "c", lazy.spawn("wal -i ~/.wallpapers"), desc="Rerun pywal"),
-    # Launch application launcher
-    Key([mod], "space", lazy.spawn(application_launcher + " -show drun"), desc="Launch rofi"),
-    # Launch gemini
-    Key([mod], "g", lazy.spawn(f"{browser} -new-tab https://gemini.google.com/app"), desc="Launch Gemini"),
- 
-    # -------- Window Management --------
- 
-    # change workspace (right / left)
-    Key([mod], "Right", lazy.screen.next_group(), desc="Next workspace"),
-    Key([mod], "Left",  lazy.screen.prev_group(), desc="Previous workspace"),
-    # toggle floating
-    Key([fn], "f", lazy.window.toggle_floating(), desc="Float window"),
-    # maximize in layout (MonadTall only — no-op in Max layout, no crash)
-    Key([mod], "n", lazy.layout.maximize(), desc="Maximize in layout"),
-    # minimize window
-    Key([mod], "m", lazy.window.minimize(), desc="Minimize window"),
-    # close window
-    Key([mod], "k", lazy.window.kill(), desc="Close window"),
-    # focus navigation (hjkl-style: a=left, d=right, w=up, s=down)
-    Key([mod], "a", lazy.layout.left(),  desc="Focus left"),
-    Key([mod], "d", lazy.layout.right(), desc="Focus right"),
-    Key([mod], "s", lazy.layout.down(),  desc="Focus down"),
-    Key([mod], "w", lazy.layout.up(),    desc="Focus up"),
-    # resize
-    Key([mod, "shift"], "a", lazy.layout.grow_left(),  desc="Resize left"),
-    Key([mod, "shift"], "d", lazy.layout.grow_right(), desc="Resize right"),
-    Key([mod, "shift"], "s", lazy.layout.grow_down(),  desc="Resize down"),
-    Key([mod, "shift"], "w", lazy.layout.grow_up(),    desc="Resize up"),
-    # quit qtile
-    Key([mod, "shift"], "q", lazy.shutdown(), desc="Quit Qtile"),
-    Key([mod, "shift"], "x", lazy.shutdown(), desc="Quit Qtile (alt)"),
- 
-    # -------- System Management --------
- 
-    # restart qtile — version-safe via lazy.function
-    Key([mod, "shift"], "r", lazy.function(safe_restart), desc="Restart Qtile (version-safe)"),
-    # scratchpad — on F12 to avoid conflict with [mod]+s (focus down)
-    Key([mod], "F12", lazy.group["scratchpad"].dropdown_toggle("term"), desc="Toggle ScratchPad"),
-    # change wallpaper
-    Key([fn], "w", lazy.function(change_wallpaper), desc="Change wallpaper"),
+    Key([mod], "Return",        lazy.spawn(terminal),                              desc="Terminal"),
+    Key([mod], "BackSpace",     lazy.spawn(browser),                               desc="Browser"),
+    Key([mod], "f",             lazy.spawn(file_manager),                          desc="Files"),
+    Key([mod, fn], "p",         lazy.spawn(power_menu),                            desc="Power menu"),
+    Key([fn], "p",              lazy.spawn(screenshot_tool),                       desc="Screenshot"),
+    Key([fn, "shift"], "c",     lazy.spawn("wal -i ~/.wallpapers"),                desc="Rerun pywal"),
+    Key([mod], "space",         lazy.spawn(application_launcher + " -show drun"), desc="Launcher"),
+    Key([mod], "g",             lazy.spawn(f"{browser} -new-tab https://gemini.google.com/app"), desc="Gemini"),
+
+    Key([mod], "Right",         lazy.screen.next_group()),
+    Key([mod], "Left",          lazy.screen.prev_group()),
+    Key([fn], "f",              lazy.window.toggle_floating()),
+    Key([mod], "n",             lazy.layout.maximize()),
+    Key([mod], "m",             lazy.window.minimize()),
+    Key([mod], "k",             lazy.window.kill()),
+    Key([mod], "a",             lazy.layout.left()),
+    Key([mod], "d",             lazy.layout.right()),
+    Key([mod], "s",             lazy.layout.down()),
+    Key([mod], "w",             lazy.layout.up()),
+    Key([mod, "shift"], "a",    lazy.layout.grow_left()),
+    Key([mod, "shift"], "d",    lazy.layout.grow_right()),
+    Key([mod, "shift"], "s",    lazy.layout.grow_down()),
+    Key([mod, "shift"], "w",    lazy.layout.grow_up()),
+    Key([mod, "shift"], "q",    lazy.shutdown()),
+    Key([mod, "shift"], "x",    lazy.shutdown()),
+    Key([mod, "shift"], "r",    lazy.function(safe_restart)),
+    Key([mod], "F12",           lazy.group["scratchpad"].dropdown_toggle("term")),
+    Key([fn], "w",              lazy.function(change_wallpaper)),
+
+    # Manual live-reload shortcut (in case you run wal from terminal yourself)
+    Key([fn, "shift"], "r",     lazy.function(reload_wal_colors), desc="Reload wal colors live"),
 ]
- 
-"""<<< ---------------------------------------------------- PYWAL ---------------------------------------------------- >>>"""
- 
-wal_file = os.path.expanduser("~/.cache/wal/colors.json")
- 
-def get_color_scheme():
-    if os.path.exists(wal_file):
-        try:
-            with open(wal_file) as f:
-                wal = json.load(f)
-            return wal.get("colors")
-        except (json.JSONDecodeError, KeyError, OSError):
-            pass
-    return None
- 
-colors = get_color_scheme() or {
-    'color0': f'{hash_sym}000000',
-    'color1': f'{hash_sym}ff0000',
-    'color2': f'{hash_sym}00ff00',
-    'color3': f'{hash_sym}ffff00',
-    'color4': f'{hash_sym}0000ff',
-    'color7': f'{hash_sym}ffffff',
-    'color8': f'{hash_sym}444444',
-}
- 
+
 """<<< ------------------------------------------------- WORKSPACES -------------------------------------------------- >>>"""
- 
+
 groups = [Group(str(i)) for i in range(1, 8)]
- 
+
 for i in groups:
     keys.extend([
-        Key([mod], i.name, lazy.group[i.name].toscreen(), desc=f"Switch to workspace {i.name}"),
-        Key([mod, "shift"], i.name, lazy.window.togroup(i.name), desc=f"Move window to workspace {i.name}"),
+        Key([mod], i.name,          lazy.group[i.name].toscreen()),
+        Key([mod, "shift"], i.name, lazy.window.togroup(i.name)),
     ])
- 
+
 """<<< --------------------------------------------------- LAYOUTS --------------------------------------------------- >>>"""
- 
+
 layouts = [
     layout.MonadTall(
-        border_focus=f"{hash_sym}ff0000",
-        border_normal=f"{hash_sym}333333",
-        border_width=4,
+        border_focus=PALETTE["accent"],
+        border_normal=PALETTE["muted"],
+        border_width=2,
         margin=8,
     ),
     layout.Max(),
 ]
- 
+
 """<<< ------------------------------------------------- AUTO START -------------------------------------------------- >>>"""
- 
+
 @hook.subscribe.startup_once
 def auto_start():
     wall_dir = os.path.expanduser("~/.wallpapers")
@@ -187,191 +211,203 @@ def auto_start():
         if files:
             random_wall = os.path.join(wall_dir, random.choice(files))
             subprocess.Popen(["wal", "-i", random_wall])
-
     subprocess.Popen(["setxkbmap", "de"])
     subprocess.Popen(["eww", "daemon"])
     subprocess.Popen(["xrandr", "--output", "eDP-1", "--mode", "1920x1080", "--pos", "0x0"])
- 
+
 """<<< ---------------------------------------------------- BAR ------------------------------------------------------ >>>"""
 
-FONT_PARAMS = {
-    "font": "JetBrainsMono Nerd Font",
-    "fontsize": 13,
-    "padding": 4,
-}
+FONT  = "JetBrainsMono Nerd Font"
+FSIZE = 13
 
-def _sep():
-    return widget.Sep(linewidth=2, foreground=colors['color8'], padding=6)
+def _gap(n=8):
+    return widget.Spacer(length=n)
+
+def _pipe(key):
+    w = widget.TextBox(text="|", font=FONT, fontsize=FSIZE,
+                       foreground=PALETTE["muted"], padding=4)
+    _LIVE_WIDGETS[key] = w
+    return w
+
+def _icon(key, text, color_key):
+    w = widget.TextBox(text=text, font=FONT, fontsize=FSIZE,
+                       foreground=PALETTE[color_key], padding=4)
+    _LIVE_WIDGETS[key] = w
+    return w
 
 def set_bar():
-    blocks = [
-        # ◢■■■ GroupBox with decorative markers ■■■◤
-        widget.TextBox(
-            text="◢", fontsize=50, padding=-1,
-            font="Arial", foreground=colors['color0'],
-        ),
-        widget.GroupBox(
-            highlight_method="line",
-            this_current_screen_border=colors['color4'],
-            other_current_screen_border=colors['color1'],
-            this_screen_border=colors['color4'],
-            other_screen_border=colors['color1'],
-            highlight_color=colors['color4'],
-            urgent_border=colors['color1'],
-            active=colors['color7'],
-            inactive=colors['color8'],
-            background=colors['color0'],
-            disable_drag=True,
-            borderwidth=2,
-            **FONT_PARAMS,
-        ),
-        widget.TextBox(
-            text="◤ ", fontsize=50, padding=-5,
-            font="Arial", foreground=colors['color0'],
-        ),
+    p = PALETTE
 
-        # Focused window title
-        widget.WindowName(foreground=colors['color4'], **FONT_PARAMS),
+    # GroupBox
+    gbox = widget.GroupBox(
+        font=FONT, fontsize=FSIZE, padding=6, borderwidth=2,
+        highlight_method="line",
+        this_current_screen_border=p["accent"],
+        other_current_screen_border=p["purple"],
+        this_screen_border=p["muted"],
+        other_screen_border=p["muted"],
+        highlight_color=[p["bg"], p["bg"]],
+        active=p["fg"],
+        inactive=p["muted"],
+        urgent_border=p["alert"],
+        background=p["bg"],
+        disable_drag=True, rounded=False, use_mouse_wheel=False,
+    )
+    _LIVE_WIDGETS["groupbox"] = gbox
 
-        _sep(),
+    # Window title
+    wname = widget.WindowName(
+        font=FONT, fontsize=FSIZE, foreground=p["muted"],
+        max_chars=40, empty_group_string="",
+    )
+    _LIVE_WIDGETS["windowname"] = wname
 
-        # Resource graphs
-        widget.CPUGraph(
-            border_color=colors['color3'],
-            graph_color=colors['color3'],
-            border_width=1, line_width=1,
-            type="line", width=50,
-        ),
-        widget.MemoryGraph(
-            border_color=colors['color4'],
-            graph_color=colors['color4'],
-            border_width=1, line_width=1,
-            type="line", width=50,
-        ),
-        widget.NetGraph(
-            border_color=colors['color2'],
-            graph_color=colors['color2'],
-            border_width=1, line_width=1,
-            type="line", width=50,
-        ),
+    # Clock (time)
+    clk_time = widget.Clock(
+        format="%H:%M", font=FONT, fontsize=16,
+        foreground=p["accent"], padding=0,
+    )
+    _LIVE_WIDGETS["clock_time"] = clk_time
 
-        _sep(),
+    # Clock separator dot
+    clk_sep = widget.TextBox(
+        text="  ", font=FONT, fontsize=FSIZE,
+        foreground=p["muted"], padding=0,
+    )
+    _LIVE_WIDGETS["clock_sep"] = clk_sep
 
-        # Volume
-        widget.TextBox("", foreground=colors['color7'], **FONT_PARAMS),
-        widget.Volume(foreground=colors['color7'], **FONT_PARAMS),
+    # Clock (date)
+    clk_date = widget.Clock(
+        format="%a %d.%m.%Y", font=FONT, fontsize=FSIZE,
+        foreground=p["muted"], padding=0,
+    )
+    _LIVE_WIDGETS["clock_date"] = clk_date
 
-        _sep(),
+    # CPU
+    cpu = widget.CPU(
+        font=FONT, fontsize=FSIZE, foreground=p["warn"],
+        format="{load_percent:.0f}%", update_interval=2, padding=0,
+    )
+    _LIVE_WIDGETS["cpu"] = cpu
 
-        # WiFi
-        widget.TextBox("", foreground=colors['color2'], **FONT_PARAMS),
-        widget.Wlan(
-            interface="wlan0",
-            format="{essid} {percent:2.0%}",
-            disconnected_message="offline",
-            foreground=colors['color2'],
-            **FONT_PARAMS,
-        ),
+    # Memory
+    mem = widget.Memory(
+        font=FONT, fontsize=FSIZE, foreground=p["purple"],
+        format="{MemPercent:.0f}%", update_interval=2, padding=0,
+    )
+    _LIVE_WIDGETS["mem"] = mem
 
-        _sep(),
+    # Volume
+    vol = widget.Volume(font=FONT, fontsize=FSIZE, foreground=p["fg"], padding=0)
+    _LIVE_WIDGETS["vol"] = vol
 
-        # Battery
-        widget.Battery(
-            format="{char} {percent:2.0%}",
-            charge_char="",
-            discharge_char="",
-            full_char="",
-            unknown_char="",
-            empty_char="",
-            low_percentage=0.2,
-            low_foreground=colors['color1'],
-            foreground=colors['color2'],
-            notify_below=20,
-            **FONT_PARAMS,
-        ),
+    # WiFi
+    wifi = widget.Wlan(
+        interface="wlan0", format="{essid}",
+        disconnected_message="offline",
+        font=FONT, fontsize=FSIZE, foreground=p["good"], padding=0,
+    )
+    _LIVE_WIDGETS["wifi"] = wifi
 
-        _sep(),
+    # Battery
+    bat = widget.Battery(
+        font=FONT, fontsize=FSIZE,
+        format="{char} {percent:2.0%}",
+        charge_char="", discharge_char="",
+        full_char="", unknown_char="?", empty_char="",
+        low_percentage=0.2,
+        low_foreground=p["alert"],
+        foreground=p["good"],
+        notify_below=20, padding=0,
+    )
+    _LIVE_WIDGETS["bat"] = bat
 
-        # Current layout icon
-        widget.CurrentLayoutIcon(padding=4),
+    notif_icon  = _icon("notif_icon",  "",   "muted")
+    cpu_icon    = _icon("cpu_icon",    "",   "warn")
+    mem_icon    = _icon("mem_icon",    "",   "purple")
+    vol_icon    = _icon("vol_icon",    "",   "fg")
+    wifi_icon   = _icon("wifi_icon",   "󰤨",   "good")
 
-        _sep(),
-
-        # Systray + Clock
-        widget.Systray(padding=4),
-        widget.Clock(
-            format="%H:%M | %d.%m.%Y",
-            foreground=colors['color7'],
-            **FONT_PARAMS,
-        ),
-    ]
+    blocks = (
+        # ── LEFT ─────────────────────────────────────────
+        [_gap(10), gbox, _gap(6), _pipe("sep_title"), _gap(6), wname]
+        # ── CENTER ───────────────────────────────────────
+        + [widget.Spacer(), clk_time, clk_sep, clk_date, widget.Spacer()]
+        # ── RIGHT ────────────────────────────────────────
+        + [
+            notif_icon,         _pipe("sep_notif"),
+            cpu_icon, cpu,      _gap(4),
+            mem_icon, mem,      _pipe("sep_res"),
+            vol_icon, vol,      _pipe("sep_vol"),
+            wifi_icon, wifi,    _pipe("sep_wifi"),
+            bat,                _pipe("sep_bat"),
+            widget.CurrentLayoutIcon(scale=0.6, padding=4),
+            _pipe("sep_layout"),
+            widget.Systray(padding=6),
+            _gap(10),
+        ]
+    )
 
     return [
         Screen(
             top=bar.Bar(
                 blocks,
-                30,
-                background=colors['color0'] + "CC",
-                margin=[5, 10, 0, 10],
-                opacity=0.9,
+                28,
+                background=p["bg"] + "E6",
+                margin=[6, 10, 0, 10],
+                border_width=0,
+                opacity=1.0,
             ),
         )
     ]
 
 screens = set_bar()
- 
+
 """<<< ---------------------------------------------------- MOUSE ---------------------------------------------------- >>>"""
- 
+
 mouse = [
     Drag([mod],  "Button1", lazy.window.set_position_floating(), start=lazy.window.get_position()),
     Drag([mod],  "Button3", lazy.window.set_size_floating(),     start=lazy.window.get_size()),
     Click([mod], "Button2", lazy.window.bring_to_front()),
 ]
- 
+
 """<<< ------------------------------------------------- SCRATCHPAD -------------------------------------------------- >>>"""
- 
+
 groups.append(
     ScratchPad("scratchpad", [
         DropDown("term", terminal, width=0.6, height=0.6, x=0.2, y=0.1, opacity=0.9),
     ])
 )
- 
+
 """<<< ---------------------------------------------------- MAIN ----------------------------------------------------- >>>"""
- 
-dgroups_app_rules    = []
-dgroups_key_binder   = None
+
+dgroups_app_rules      = []
+dgroups_key_binder     = None
 dgroups_focus_by_rule  = False
 dgroups_match_by_rule  = True
 dgroups_repeat_once    = True
- 
+
 follow_mouse_focus   = True
 bring_front_on_focus = False
 cursor_warp          = False
- 
+
 floating_layout = layout.Floating(
     float_rules=[
         *layout.Floating.default_float_rules,
-        Match(wm_class='confirm'),
-        Match(wm_class='dialog'),
-        Match(wm_class='download'),
-        Match(wm_class='error'),
-        Match(wm_class='file_progress'),
-        Match(wm_class='notification'),
-        Match(wm_class='splash'),
-        Match(wm_class='toolbar'),
-        Match(wm_class='ssh-askpass'),
-        Match(wm_class='pinentry'),
+        Match(wm_class='confirm'),   Match(wm_class='dialog'),
+        Match(wm_class='download'),  Match(wm_class='error'),
+        Match(wm_class='file_progress'), Match(wm_class='notification'),
+        Match(wm_class='splash'),    Match(wm_class='toolbar'),
+        Match(wm_class='ssh-askpass'), Match(wm_class='pinentry'),
         Match(wm_class='confirmreset'),
-        Match(title='makebranch'),
-        Match(title='maketag'),
-        Match(title='branchdialog'),
-        Match(title='pinentry'),
+        Match(title='makebranch'),   Match(title='maketag'),
+        Match(title='branchdialog'), Match(title='pinentry'),
     ]
 )
- 
-auto_fullscreen          = True
+
+auto_fullscreen            = True
 focus_on_window_activation = "smart"
-reconfigure_screens      = True
-auto_minimize            = True
- 
+reconfigure_screens        = True
+auto_minimize              = True
+
 wmname = "LG3D"

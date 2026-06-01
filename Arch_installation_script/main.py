@@ -7,9 +7,9 @@ import os
 
 Timeout = 300
 system_name = "Arch"
-profile_name = "username"
-profile_password = "YourPassword123!"
-root_password = "YourRootPassword123!"
+profile_name = "tobster"
+profile_password = ""
+root_password = ""
 keyboard_layout = "de-latin1"
 timezone = "Europe/Berlin"
 

@@ -77,6 +77,7 @@ autostart_content = """#!/bin/bash
 pipewire &
 pipewire-pulse &
 wireplumber &
+picom --config ~/.config/picom/picom.conf &
 """
 
 xinitrc_content = """#!/bin/bash
@@ -314,14 +315,6 @@ def picom_config():
     execute_command("chown -R tobster:tobster /home/tobster/.config/picom")
     print("-> Picom configuration installed.")
 
-def picom_service():
-    service_dir = "/home/tobster/.config/systemd/user"
-    execute_command(f"mkdir -p {service_dir}")
-    with open(f"{service_dir}/picom.service", "w") as f:
-        f.write(picom_service_content)
-    execute_command("su - tobster -c 'systemctl --user enable picom.service'")
-    execute_command("chown -R tobster:tobster /home/tobster/.config/systemd")
-    print("-> Picom systemd user service installed & enabled.")
 
 def detect_wifi_interface():
     print("\nDetecting WiFi interface...")
@@ -342,7 +335,6 @@ def detect_wifi_interface():
         print("-> Could not detect WiFi interface, leaving 'wlan0' as default.")
 
 def autostart():
-    # autostart.sh
     autostart_path = "/home/tobster/.config/qtile/autostart.sh"
     with open(autostart_path, "w") as f:
         f.write(autostart_content)
@@ -420,7 +412,6 @@ def main():
     detect_wifi_interface()
     picom_config()
     load_wallpapers_to_folders()
-    picom_service()
     setup_pipewire()
     setup_bluetooth()
     setup_networkmanager()

@@ -57,26 +57,8 @@ wintypes:
 };
 """
 
-picom_service_content = """[Unit]
-Description=Picom compositor
-After=graphical-session.target
-PartOf=graphical-session.target
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/picom --config %h/.config/picom/picom.conf
-Restart=on-failure
-RestartSec=2s
-
-[Install]
-WantedBy=graphical-session.target
-"""
-
-# Picom wird jetzt via systemd user service gestartet, nicht mehr hier
+# Picom via autostart.sh, Pipewire via systemd symlinks
 autostart_content = """#!/bin/bash
-pipewire &
-pipewire-pulse &
-wireplumber &
 picom --config ~/.config/picom/picom.conf &
 """
 
@@ -189,7 +171,7 @@ success_symbol = "[❯](color2)"
 error_symbol = "[❯](color1)"
 """
 
-timeout = 300
+timeout = 3000
 terminal = "alacritty"
 browser = "zen-browser"
 power_menu = "eww"
@@ -199,13 +181,33 @@ file_manager = "thunar"
 failed_packages = []
 
 before_download = ["networkmanager", "git", "base-devel", "archlinux-keyring", "rust", "cargo"]
-download_list = ["zsh", "starship", "oh-my-zsh", terminal, browser, power_menu, application_launcher, file_manager, "picom", "lib32-libva-mesa-driver", "libva-mesa-driver", "lib32-vulkan-radeon", "vulkan-radeon", "xf86-video-amdgpu", "xorg-server", "xorg-xinit", "xorg-xauth", "mesa", "xf86-input-libinput", "python", "uv", "nano", "rust-analyzer", "windsurf", "steam", "vesktop", "qtile", "pipewire", "pipewire-pulse", "pipewire-alsa", "pipewire-jack", "htop", "fastfetch", "spectacle", "dunst", "feh", "polkit-gnome", "wireplumber", "pavucontrol", "ttf-jetbrains-mono-nerd", "unzip", "python-pywal"]
+
+download_list = [
+    "zsh", "starship", terminal, browser, power_menu, application_launcher, file_manager,
+    "picom", "lib32-libva-mesa-driver", "libva-mesa-driver", "lib32-vulkan-radeon",
+    "vulkan-radeon", "xf86-video-amdgpu", "xorg-server", "xorg-xinit", "xorg-xauth",
+    "mesa", "xf86-input-libinput", "python", "uv", "nano", "rust-analyzer", "windsurf-bin",
+    "steam", "vesktop", "qtile", "pipewire", "pipewire-pulse", "pipewire-alsa",
+    "pipewire-jack", "htop", "fastfetch", "spectacle", "dunst", "feh", "polkit-gnome",
+    "wireplumber", "pavucontrol", "ttf-jetbrains-mono-nerd", "unzip", "python-pywal",
+    "bluez", "bluez-utils",
+]
 
 #<<<-----------------------------------------------------------FUNCTIONS---------------------------------------------------------->>>
 
 def execute_command(command: str):
-    result = subprocess.run(command, shell=True, check=True, capture_output=True, text=True, timeout=timeout)
-    return result.stdout
+    try:
+        result = subprocess.run(
+            command, shell=True, check=True,
+            capture_output=True, text=True, timeout=timeout
+        )
+        return result.stdout
+    except subprocess.TimeoutExpired:
+        print(f"Timeout after {timeout}s: {command}")
+        raise
+    except subprocess.CalledProcessError as e:
+        # stderr weitergeben damit Aufrufer es loggen können
+        raise subprocess.CalledProcessError(e.returncode, e.cmd, e.output, e.stderr)
 
 def smart_download_package(package):
     print(f"\nTrying to install package: {package}")
@@ -213,13 +215,13 @@ def smart_download_package(package):
         execute_command(f"pacman -S --needed --noconfirm {package}")
         print(f"-> {package} successfully installed via pacman.")
         return
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         print(f"Pacman failed for {package}. Trying yay...")
     try:
-        execute_command(f"su - tobster -c 'yay -S --needed --noconfirm {package}'")
+        execute_command(f"su - tobster -c 'HOME=/home/tobster yay -S --needed --noconfirm {package}'")
         print(f"-> {package} successfully installed via yay.")
         return
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         print(f"Yay failed for {package}. Trying Flatpak...")
     try:
         search_output = execute_command(f"flatpak search --columns=application {package}")
@@ -228,7 +230,7 @@ def smart_download_package(package):
             execute_command(f"flatpak install -y flathub {flatpak_id}")
             print(f"-> {package} successfully installed via flatpak ({flatpak_id}).")
             return
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         print(f"Flatpak installation failed for {package}.")
     failed_packages.append(package)
     print(f"Error: '{package}' could not be installed anywhere.")
@@ -236,22 +238,22 @@ def smart_download_package(package):
 def pacman_install(package):
     try:
         execute_command(f"pacman -S --needed --noconfirm {package}")
-    except subprocess.CalledProcessError:
-        print(f"Pacman failed for {package}.")
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+        print(f"Pacman failed for {package}: {getattr(e, 'stderr', '')}")
         failed_packages.append(package)
 
 def yay_install(package):
     try:
-        execute_command(f"su - tobster -c 'yay -S --needed --noconfirm {package}'")
-    except subprocess.CalledProcessError:
-        print(f"Yay failed for {package}.")
+        execute_command(f"su - tobster -c 'HOME=/home/tobster yay -S --needed --noconfirm {package}'")
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+        print(f"Yay failed for {package}: {getattr(e, 'stderr', '')}")
         failed_packages.append(package)
 
 def flatpak_install(package):
     try:
         execute_command(f"flatpak install -y flathub {package}")
-    except subprocess.CalledProcessError:
-        print(f"Flatpak failed for {package}.")
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+        print(f"Flatpak failed for {package}: {getattr(e, 'stderr', '')}")
         failed_packages.append(package)
 
 def clone_git(url, dest="/tmp/cloned_repo"):
@@ -265,16 +267,33 @@ def install_before_packages():
         execute_command("rm -rf /tmp/yay")
         execute_command("git clone https://aur.archlinux.org/yay.git /tmp/yay")
         execute_command("chown -R tobster:tobster /tmp/yay")
-        # HOME explizit setzen, da su in subprocess manchmal /root erbt
         execute_command("su - tobster -c 'cd /tmp/yay && HOME=/home/tobster makepkg -si --noconfirm'")
         print("-> yay successfully installed.")
     except subprocess.CalledProcessError as e:
-        print(f"Critical error: yay could not be built. {e.stderr}")
+        print(f"Critical error: yay could not be built.\nstdout: {e.output}\nstderr: {e.stderr}")
+        failed_packages.append("yay")
+    except subprocess.TimeoutExpired:
+        print("Critical error: yay build timed out.")
         failed_packages.append("yay")
 
 def install_packages():
     for package in download_list:
         smart_download_package(package)
+
+def install_oh_my_zsh():
+    # oh-my-zsh hat keinen pacman/AUR-Paketnamen, wird via Installer-Script installiert
+    print("\nInstalling oh-my-zsh...")
+    try:
+        execute_command(
+            "su - tobster -c '"
+            "HOME=/home/tobster RUNZSH=no CHSH=no "
+            'sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"'
+            "'"
+        )
+        print("-> oh-my-zsh installed.")
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+        print(f"oh-my-zsh install failed: {getattr(e, 'stderr', '')}")
+        failed_packages.append("oh-my-zsh")
 
 def qtile_config():
     url = "https://github.com/tobiastettenborn193-prog/OS.git"
@@ -288,19 +307,19 @@ def qtile_config():
 def setup_system_basics():
     try:
         execute_command("sed -i '/\\[multilib\\]/,+1 s/^#//' /etc/pacman.conf")
-        execute_command("pacman -Sy")
+        execute_command("pacman -Syy")
         execute_command("pacman -S --needed --noconfirm flatpak")
         execute_command("flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo")
         print("-> Multilib + Flathub enabled.")
     except subprocess.CalledProcessError:
         print("Failed to enable multilib/flatpak.")
     try:
-        execute_command("useradd -m -G wheel -s /bin/bash tobster")
+        execute_command("useradd -m -G wheel -s /bin/zsh tobster")
         execute_command("echo 'tobster:password' | chpasswd")
         execute_command("sed -i 's/# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers")
         print("-> User 'tobster' created and sudo access configured.")
     except subprocess.CalledProcessError:
-        print("Failed to create user or setup sudo.")
+        print("Failed to create user or setup sudo (user may already exist).")
     try:
         execute_command("systemctl enable NetworkManager")
         print("-> NetworkManager service enabled.")
@@ -314,7 +333,6 @@ def picom_config():
         f.write(picom_content)
     execute_command("chown -R tobster:tobster /home/tobster/.config/picom")
     print("-> Picom configuration installed.")
-
 
 def detect_wifi_interface():
     print("\nDetecting WiFi interface...")
@@ -364,15 +382,30 @@ def autostart():
     execute_command("chown -R tobster:tobster /home/tobster")
 
 def setup_pipewire():
-    execute_command("systemctl enable pipewire.service")
-    execute_command("systemctl enable pipewire-pulse.service")
-    execute_command("systemctl enable wireplumber.service")
-    print("-> Pipewire services enabled.")
+    # systemctl --user enable funktioniert nicht im Install-Kontext ohne laufende DBus-Session
+    # Stattdessen: Symlinks manuell setzen wie systemctl --user enable es tun würde
+    service_dir = "/home/tobster/.config/systemd/user"
+    wants_dir = f"{service_dir}/default.target.wants"
+    execute_command(f"mkdir -p {wants_dir}")
+
+    for service in ["pipewire.service", "pipewire-pulse.service", "wireplumber.service"]:
+        execute_command(
+            f"ln -sf /usr/lib/systemd/user/{service} {wants_dir}/{service}"
+        )
+
+    execute_command("chown -R tobster:tobster /home/tobster/.config/systemd")
+    print("-> Pipewire user services enabled via symlinks.")
 
 def setup_zsh():
-    execute_command("cp /home/tobster/OS/zsh/zsh.zshrc /home/tobster/.zshrc")
-    execute_command("chown tobster:tobster /home/tobster/.zshrc")
-    print("-> Zsh configured.")
+    # Pfad korrigiert: zshrc kommt aus dem geclonten Repo in /tmp/OS_config
+    zshrc_src = "/tmp/OS_config/zsh/zsh.zshrc"
+    zshrc_dst = "/home/tobster/.zshrc"
+    try:
+        execute_command(f"cp {zshrc_src} {zshrc_dst}")
+        execute_command(f"chown tobster:tobster {zshrc_dst}")
+        print("-> Zsh configured.")
+    except subprocess.CalledProcessError:
+        print(f"Warning: Could not copy zshrc from {zshrc_src} — file may not exist in repo.")
 
 def setup_starship():
     config_dir = "/home/tobster/.config"
@@ -381,7 +414,6 @@ def setup_starship():
         f.write(starship_content)
     execute_command(f"chown tobster:tobster {config_dir}/starship.toml")
     print("-> Starship configured (pywal palette will update on first wal run).")
-
 
 def load_wallpapers_to_folders():
     execute_command("mkdir -p /home/tobster/.wallpapers")
@@ -392,15 +424,14 @@ def setup_bluetooth():
     execute_command("systemctl enable bluetooth.service")
     print("-> Bluetooth service enabled.")
 
-
 def setup_networkmanager():
     execute_command("systemctl enable NetworkManager.service")
     print("-> NetworkManager service enabled.")
 
-def setup_ly():
-    pacman_install("ly")
-    execute_command("systemctl enable ly.service")
-    print("-> Ly display manager enabled.")
+#def setup_ly():
+#   pacman_install("ly")
+#  execute_command("systemctl enable ly.service")
+#    print("-> Ly display manager enabled.")
 
 #<<<-----------------------------------------------------------MAIN---------------------------------------------------------->>>
 
@@ -408,6 +439,7 @@ def main():
     setup_system_basics()
     install_before_packages()
     install_packages()
+    install_oh_my_zsh()
     qtile_config()
     detect_wifi_interface()
     picom_config()
@@ -415,11 +447,11 @@ def main():
     setup_pipewire()
     setup_bluetooth()
     setup_networkmanager()
-    setup_ly()
+    #setup_ly()
     setup_zsh()
     setup_starship()
     autostart()
-    
+
     print("\n--- Process Finished ---")
     if failed_packages:
         print(f"Failed to install: {', '.join(failed_packages)}")

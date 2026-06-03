@@ -4,12 +4,20 @@ import os
 import json
 import random
 import subprocess
-from libqtile import layout, widget, bar, hook, qtile as _qtile_instance
+from libqtile import layout, widget, bar, hook
 from libqtile.config import Group, Key, Screen, ScratchPad, DropDown, Match, Drag, Click
+
+# Fallback-Architektur für lazy (deckt Qtile <0.18 und aktuelle Versionen ab)
 try:
     from libqtile.lazy import lazy
 except ImportError:
     from libqtile.command import lazy
+
+# Fallback-Architektur für das globale qtile Objekt
+try:
+    from libqtile import qtile as global_qtile
+except ImportError:
+    global_qtile = None
 
 """<<< ----------------------------------------------- HYPERPARAMETERS ----------------------------------------------- >>>"""
 
@@ -43,13 +51,17 @@ def _build_palette(colors, special):
     """Turn raw wal dicts into named aliases used by the bar."""
     bg     = special.get("background", colors.get("color0",  "#1a1a2e"))
     fg     = special.get("foreground", colors.get("color7",  "#abb2bf"))
-    accent = colors.get("color4",  "#61afef")   # blue  — active group / clock
-    muted  = colors.get("color8",  "#3e4452")   # gray  — separators / inactive
-    good   = colors.get("color2",  "#98c379")   # green — battery / wifi
-    warn   = colors.get("color3",  "#e5c07b")   # amber — cpu / mem
-    alert  = colors.get("color1",  "#e06c75")   # red   — low battery / urgent
-    purple = colors.get("color5",  "#c678dd")   # purple— layout / ram
-    return dict(bg=bg, fg=fg, accent=accent, muted=muted,
+    accent = colors.get("color4",  "#61afef")   # active group / borders
+    muted  = colors.get("color8",  "#3e4452")   # inactive borders / separators
+    good   = colors.get("color2",  "#98c379")   
+    warn   = colors.get("color3",  "#e5c07b")   
+    alert  = colors.get("color1",  "#e06c75")   
+    purple = colors.get("color5",  "#c678dd")   
+    
+    # Sichere Hex-Transparenz (BF = ~75% Deckkraft). 
+    bg_trans = bg + "BF" if len(bg) == 7 else bg 
+    
+    return dict(bg=bg, bg_trans=bg_trans, fg=fg, accent=accent, muted=muted,
                 good=good, warn=warn, alert=alert, purple=purple)
 
 _raw_colors, _raw_special = _load_wal()
@@ -58,8 +70,8 @@ PALETTE = _build_palette(_raw_colors, _raw_special)
 # ── Live color-reload ──────────────────────────────────────────────────────────
 _LIVE_WIDGETS: dict = {}
 
-def reload_wal_colors(qtile=None):
-    """Re-read ~/.cache/wal/colors.json and push new colors to every bar widget."""
+def reload_wal_colors(qtile_obj=None):
+    """Re-read ~/.cache/wal/colors.json and push new colors live (Crash-Safe)."""
     raw_c, raw_s = _load_wal()
     p = _build_palette(raw_c, raw_s)
     PALETTE.update(p)
@@ -70,7 +82,8 @@ def reload_wal_colors(qtile=None):
                               ("this_current_screen_border", p["accent"]),
                               ("other_current_screen_border", p["purple"]),
                               ("this_screen_border", p["muted"]),
-                              ("urgent_border", p["alert"])],
+                              ("urgent_border", p["alert"]),
+                              ("background", p["bg"])],
         "windowname":        [("foreground",  p["muted"])],
         "clock_time":        [("foreground",  p["accent"])],
         "clock_sep":         [("foreground",  p["muted"])],
@@ -85,15 +98,18 @@ def reload_wal_colors(qtile=None):
         "wifi":              [("foreground",  p["good"])],
         "bat":               [("foreground",  p["good"]),
                               ("low_foreground", p["alert"])],
+        "sep_title":         [("foreground",  p["muted"])],
         "sep_notif":         [("foreground",  p["muted"])],
         "sep_res":           [("foreground",  p["muted"])],
         "sep_vol":           [("foreground",  p["muted"])],
         "sep_wifi":          [("foreground",  p["muted"])],
         "sep_bat":           [("foreground",  p["muted"])],
+        "current_layout":    [("foreground",  p["accent"])],
         "sep_layout":        [("foreground",  p["muted"])],
         "notif_icon":        [("foreground",  p["muted"])],
     }
 
+    # Defensives Update der Widgets: Ignoriert Fehler bei fehlenden Attributen
     for key, attrs in mapping.items():
         w = _LIVE_WIDGETS.get(key)
         if w is None:
@@ -101,52 +117,66 @@ def reload_wal_colors(qtile=None):
         for attr, value in attrs:
             try:
                 setattr(w, attr, value)
-            except Exception:
+            except (AttributeError, Exception):
                 pass
         try:
             w.draw()
         except Exception:
             pass
 
-    # Layout borders live updaten
-    try:
-        instance = qtile or _qtile_instance
-        for group in instance.groups:
-            for lay in group.layouts:
-                if hasattr(lay, 'border_focus'):
-                    lay.border_focus = p["accent"]
-                if hasattr(lay, 'border_normal'):
-                    lay.border_normal = p["muted"]
-    except Exception:
-        pass
+    # Ermittle das aktuelle qtile Objekt (Parameter oder globaler Fallback)
+    instance = qtile_obj or global_qtile
 
-    # Bar background
-    try:
-        bg_with_alpha = p["bg"] + "E6"
-        for screen in (qtile or _qtile_instance).screens:
-            if screen.top:
-                screen.top.background = bg_with_alpha
-                screen.top.draw()
-    except Exception:
-        pass
+    # Fenster-Rahmen und Bar live updaten (Crash-Safe)
+    if instance:
+        try:
+            for group in instance.groups:
+                for lay in group.layouts:
+                    if hasattr(lay, 'border_focus'):
+                        lay.border_focus = p["accent"]
+                    if hasattr(lay, 'border_normal'):
+                        lay.border_normal = p["muted"]
+                
+                # Erzwinge das Neuzeichnen der aktuellen Fensterrahmen
+                for win in group.windows:
+                    if win.floating and hasattr(win, 'paint_borders'):
+                        win.paint_borders(p["accent"] if win.has_focus else p["muted"])
+            
+            # Bar Hintergrund live updaten
+            for screen in instance.screens:
+                if screen.top and hasattr(screen.top, 'background'):
+                    screen.top.background = p["bg_trans"]
+                    screen.top.draw()
+                    
+            # Fokus auffrischen damit Ränder sofort die Farbe wechseln
+            if hasattr(instance, 'current_screen') and instance.current_screen:
+                instance.current_screen.group.focus(instance.current_window)
+        except Exception:
+            pass
 
 """<<< -------------------------------------------------- FUNCTIONS -------------------------------------------------- >>>"""
 
-def change_wallpaper(qtile=None):
-    """Pick a random wallpaper, run pywal. The postscript handles color reload."""
+def change_wallpaper(qtile_obj=None):
+    """Pick a random wallpaper, run pywal."""
     wall_dir = os.path.expanduser("~/.wallpapers")
     os.makedirs(wall_dir, exist_ok=True)
     files = [f for f in os.listdir(wall_dir) if f.lower().endswith(('.jpg', '.png', '.jpeg'))]
     if not files:
         return
     full_path = os.path.join(wall_dir, random.choice(files))
-    subprocess.Popen(["wal", "-i", full_path])
+    subprocess.Popen(f"wal -i '{full_path}' && qtile cmd-obj -o cmd -f eval -a 'reload_wal_colors()'", shell=True)
 
-def safe_restart(qtile):
-    try:
-        qtile.reload_config()
-    except AttributeError:
-        qtile.restart()
+def safe_restart(qtile_obj=None):
+    # Cross-Version sicherer Neustart
+    instance = qtile_obj or global_qtile
+    if instance:
+        try:
+            instance.reload_config()
+        except AttributeError:
+            try:
+                instance.restart()
+            except AttributeError:
+                pass
 
 """<<< ------------------------------------------------- KEYBINDINGS ------------------------------------------------- >>>"""
 
@@ -176,10 +206,11 @@ keys = [
     Key([mod, "shift"], "w",    lazy.layout.grow_up()),
     Key([mod, "shift"], "q",    lazy.shutdown()),
     Key([mod, "shift"], "x",    lazy.shutdown()),
+    
+    # lazy.function() erwartet eine Funktion, das funktioniert in alten und neuen Versionen
     Key([mod, "shift"], "r",    lazy.function(safe_restart)),
     Key([mod], "F12",           lazy.group["scratchpad"].dropdown_toggle("term")),
     Key([fn], "w",              lazy.function(change_wallpaper)),
-
     Key([fn, "shift"], "r",     lazy.function(reload_wal_colors), desc="Reload wal colors live"),
 ]
 
@@ -199,13 +230,15 @@ layouts = [
     layout.MonadTall(
         border_focus=PALETTE["accent"],
         border_normal=PALETTE["muted"],
-        border_width=2,
+        border_width=3,  
         margin=8,
     ),
     layout.Max(),
 ]
 
 """<<< ------------------------------------------------- AUTO START -------------------------------------------------- >>>"""
+
+subprocess.Popen(["/home/tobster/.config/qtile/autostart.sh"])
 
 @hook.subscribe.startup_once
 def auto_start():
@@ -215,6 +248,10 @@ def auto_start():
         if files:
             random_wall = os.path.join(wall_dir, random.choice(files))
             subprocess.Popen(["wal", "-i", random_wall])
+            
+    # Compositor für Transparenz
+    subprocess.Popen(["picom", "-b"]) 
+    
     subprocess.Popen(["setxkbmap", "de"])
     subprocess.Popen(["eww", "daemon"])
     subprocess.Popen(["xrandr", "--output", "eDP-1", "--mode", "1920x1080", "--pos", "0x0"])
@@ -242,6 +279,7 @@ def _icon(key, text, color_key):
 def set_bar():
     p = PALETTE
 
+    # Alle Parameter hier sind in so gut wie allen Qtile-Versionen stabil
     gbox = widget.GroupBox(
         font=FONT, fontsize=FSIZE, padding=6, borderwidth=2,
         highlight_method="line",
@@ -316,6 +354,12 @@ def set_bar():
     )
     _LIVE_WIDGETS["bat"] = bat
 
+    # Hier ist das neue CurrentLayout Widget
+    curr_layout = widget.CurrentLayout(
+        font=FONT, fontsize=FSIZE, foreground=p["accent"], padding=4
+    )
+    _LIVE_WIDGETS["current_layout"] = curr_layout
+
     notif_icon  = _icon("notif_icon",  "",   "muted")
     cpu_icon    = _icon("cpu_icon",    "",   "warn")
     mem_icon    = _icon("mem_icon",    "",   "purple")
@@ -332,7 +376,7 @@ def set_bar():
             vol_icon, vol,      _pipe("sep_vol"),
             wifi_icon, wifi,    _pipe("sep_wifi"),
             bat,                _pipe("sep_bat"),
-            widget.CurrentLayoutIcon(scale=0.6, padding=4),
+            curr_layout,        # EINGEFÜGT ANSTELLE DES ICONS
             _pipe("sep_layout"),
             widget.Systray(padding=6),
             _gap(10),
@@ -344,7 +388,7 @@ def set_bar():
             top=bar.Bar(
                 blocks,
                 28,
-                background=p["bg"] + "E6",
+                background=p["bg_trans"],
                 margin=[6, 10, 0, 10],
                 border_width=0,
                 opacity=1.0,
@@ -393,7 +437,10 @@ floating_layout = layout.Floating(
         Match(wm_class='confirmreset'),
         Match(title='makebranch'),   Match(title='maketag'),
         Match(title='branchdialog'), Match(title='pinentry'),
-    ]
+    ],
+    border_focus=PALETTE["accent"],
+    border_normal=PALETTE["muted"],
+    border_width=3
 )
 
 auto_fullscreen            = True

@@ -317,7 +317,7 @@ def auto_start():
 """<<< ---------------------------------------------------- BAR ------------------------------------------------------ >>>"""
 
 FONT = "JetBrainsMono Nerd Font"
-FSIZE = 13
+FSIZE = 14
 
 
 def _gap(n=8):
@@ -343,7 +343,6 @@ def _icon(key, text, color_key):
 def set_bar():
     p = PALETTE
 
-    # FIX: Arch-Logo links — Farbe folgt pywal accent
     arch_logo = widget.TextBox(
         text="󰣇",  # Arch-Logo Nerd Font Icon
         font=FONT,
@@ -368,7 +367,7 @@ def set_bar():
         active=p["fg"],
         inactive=p["muted"],
         urgent_border=p["alert"],
-        background="#00000000",
+        background="#CC000000",
         disable_drag=True,
         rounded=False,
         use_mouse_wheel=False,

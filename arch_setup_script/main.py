@@ -504,6 +504,7 @@ before_download = [
     "archlinux-keyring",
     "rust",
     "cargo",
+    "go",  # FIX: für yay build
 ]
 
 download_list = [
@@ -606,36 +607,52 @@ def execute_command(command: str, as_user: bool = False):
 def install_yay():
     print("\nBuilding yay from AUR...")
     try:
+        # NOPASSWD sicherstellen bevor Build startet
+        execute_command(
+            "sed -i 's/# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) NOPASSWD: ALL/' /etc/sudoers"
+        )
+        execute_command(
+            "sed -i 's/%wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) NOPASSWD: ALL/' /etc/sudoers"
+        )
+
+        execute_command("pacman -S --needed --noconfirm base-devel git go")
         execute_command("rm -rf /tmp/yay_build")
         execute_command("mkdir -p /tmp/yay_build")
         execute_command("chown -R tobster:tobster /tmp/yay_build")
 
-        # base-devel + git sicherstellen
-        execute_command("pacman -S --needed --noconfirm base-devel git")
-
         build_cmd = (
-            "export HOME=/home/tobster && "
-            "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin && "
             "cd /tmp/yay_build && "
             "git clone https://aur.archlinux.org/yay.git . && "
+            "GOPATH=/home/tobster/go GOCACHE=/home/tobster/.cache/go "
             "makepkg -si --noconfirm --needed 2>&1"
         )
 
-        # FIX: sudo -u statt su - -> kein PTY nötig, erbt Session sauber
         result = subprocess.run(
-            ["sudo", "-u", "tobster", "bash", "-c", build_cmd],
+            [
+                "sudo",
+                "-u",
+                "tobster",
+                "--preserve-env=HOME,PATH,GOPATH,GOCACHE",
+                "bash",
+                "-c",
+                build_cmd,
+            ],
             capture_output=True,
             text=True,
             timeout=timeout,
-            env=TOBSTER_ENV,
+            env={
+                **TOBSTER_ENV,
+                "GOPATH": "/home/tobster/go",
+                "GOCACHE": "/home/tobster/.cache/go",
+                "GOPROXY": "https://proxy.golang.org,direct",
+            },
         )
 
         if result.returncode != 0:
-            print(f"yay stdout:\n{result.stdout[-2000:]}")
-            print(f"yay stderr:\n{result.stderr[-2000:]}")
+            print(f"yay stdout:\n{result.stdout[-3000:]}")
+            print(f"yay stderr:\n{result.stderr[-3000:]}")
             raise subprocess.CalledProcessError(result.returncode, "makepkg")
 
-        # Verifizieren
         check = subprocess.run(
             ["sudo", "-u", "tobster", "which", "yay"],
             capture_output=True,
@@ -644,6 +661,10 @@ def install_yay():
         )
         if check.returncode != 0:
             raise RuntimeError("yay binary not found after build")
+
+        execute_command(
+            "chown -R tobster:tobster /home/tobster/go /home/tobster/.cache/go 2>/dev/null || true"
+        )
 
         print("-> yay successfully installed.")
 
@@ -659,7 +680,6 @@ def install_yay():
 def yay_install(package: str):
     print(f"\n[yay] Installing: {package}")
     try:
-        # FIX: sudo -u statt su - -> zuverlässiger in nicht-interaktiven Subprozessen
         result = subprocess.run(
             [
                 "sudo",

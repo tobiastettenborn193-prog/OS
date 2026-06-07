@@ -29,7 +29,7 @@ hash_sym = chr(35)
 
 terminal = "alacritty"
 browser = "zen-browser"
-file_manager = "nemo"  # FIX: war "thunar"
+file_manager = "nemo"
 screenshot_tool = "spectacle"
 power_menu = "eww"
 application_launcher = "rofi"
@@ -46,7 +46,7 @@ def _load_wal():
             with open(WAL_FILE) as f:
                 wal = json.load(f)
             return wal.get("colors", {}), wal.get("special", {})
-        except (json.JSONDecodeError, KeyError, OSError):
+        except json.JSONDecodeError, KeyError, OSError:
             pass
     return {}, {}
 
@@ -127,7 +127,7 @@ def reload_wal_colors(qtile_obj=None):
         for attr, value in attrs:
             try:
                 setattr(w, attr, value)
-            except (AttributeError, Exception):
+            except AttributeError, Exception:
                 pass
         try:
             w.draw()
@@ -317,13 +317,13 @@ FONT = "JetBrainsMono Nerd Font"
 FSIZE = 14
 
 
-def _make_bar_bg(alpha_hex: str = "D9") -> str:
-    # FIX: Fester, neutraler Hintergrund, damit Live-Reloads sauber aussehen
-    bg = "1a1a2e"
+def _make_bar_bg(alpha_hex: str = "CC") -> str:
+    # FIX: Pures, unmissverständliches Schwarz. Keine Space-Cadet-Farbe mehr!
+    bg = "000000"
     return f"#{alpha_hex}{bg}"
 
 
-BAR_BG = _make_bar_bg("D9")
+BAR_BG = _make_bar_bg("CC")
 
 
 def _gap(n=8):
@@ -373,7 +373,7 @@ def set_bar():
         active=p["fg"],
         inactive=p["muted"],
         urgent_border=p["alert"],
-        background=None,  # FIX: Transparenz hier deaktiviert (#00000000 entfernt)
+        background=None,  # FIX: Transparenz hier deaktiviert
         disable_drag=True,
         rounded=False,
         use_mouse_wheel=False,

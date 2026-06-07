@@ -10,7 +10,6 @@ backend = "glx";
 glx-no-stencil = true;
 vsync = true;
 use-damage = true;
-# FIX: glx-no-rebind-pixmap entfernt (deprecated, hat die Warnung verursacht)
 
 # Corners (The Hyprland Look)
 corner-radius = 12;
@@ -132,11 +131,10 @@ fi
 echo "-> Ly config updated with wal colors."
 """
 
-# FIX: Alacritty Postscript um den File-Read-Crash (Race Condition) abzufangen
+# FIX: Cat statt cp/mv erhält die Inode der Datei aufrecht, was Alacritty nicht crashen lässt!
 alacritty_wal_postscript_content = """#!/bin/bash
-# Atomic copy to prevent Alacritty reading incomplete empty files
-cp ~/.cache/wal/colors-alacritty.toml /tmp/alacritty-live.toml
-mv /tmp/alacritty-live.toml ~/.config/alacritty/colors-live.toml
+cat ~/.cache/wal/colors-alacritty.toml > ~/.config/alacritty/colors-live.toml
+touch ~/.config/alacritty/colors-live.toml
 """
 
 starship_content = """
@@ -212,7 +210,6 @@ success_symbol = "[❯](color2)"
 error_symbol = "[❯](color1)"
 """
 
-# FIX: Import zeigt jetzt auf colors-live.toml
 alacritty_content = """import = ["~/.config/alacritty/colors-live.toml"]
 
 [window]
@@ -511,6 +508,7 @@ before_download = [
     "go",
 ]
 
+# FIX: Pakete, die aus dem AUR in die offiziellen Repos gewandert sind, hierher verschoben
 download_list = [
     "zsh",
     "starship",
@@ -556,49 +554,34 @@ download_list = [
     "papirus-icon-theme",
     "ly",
     "wireshark-qt",
+    "jdk17-openjdk",  # War vorher im AUR!
+    "prismlauncher",  # War vorher im AUR!
 ]
 
+# FIX: -bin Anhängsel hinzugefügt, um endlose Build-Schleifen zu verhindern.
 aur_packages = [
-    "zen-browser",
+    "zen-browser-bin",
     "eww",
     "windsurf-bin",
-    "bibata-cursor-theme",
+    "bibata-cursor-theme-bin",
     "nemo-fileroller",
     "python-pywal16",
-    "prismlauncher",
-    "jdk17-openjdk",
 ]
 
 # <<<-----------------------------------------------------------FUNCTIONS---------------------------------------------------------->>>
 
-# Vollständiger PATH + alle Env-Vars die makepkg/yay brauchen
 TOBSTER_ENV = {
     "HOME": "/home/tobster",
     "USER": "tobster",
-    "LOGNAME": "tobster",  # makepkg prüft diesen Wert
+    "LOGNAME": "tobster",
     "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/tobster/.local/bin:/home/tobster/go/bin",
     "TERM": "xterm",
     "GOPATH": "/home/tobster/go",
     "GOCACHE": "/home/tobster/.cache/go",
     "GOPROXY": "https://proxy.golang.org,direct",
     "XDG_CACHE_HOME": "/home/tobster/.cache",
-    "XDG_RUNTIME_DIR": "/run/user/1000",  # verhindert warnings in makepkg
+    "XDG_RUNTIME_DIR": "/run/user/1000",
 }
-
-
-def _yay_cmd(package: str) -> str:
-    """Wiederverwendbarer yay-Befehl mit allen nötigen Flags für non-interaktiven Betrieb."""
-    return (
-        "export HOME=/home/tobster && "
-        "export LOGNAME=tobster && "
-        "export XDG_CACHE_HOME=/home/tobster/.cache && "
-        "export GOPATH=/home/tobster/go && "
-        "export GOCACHE=/home/tobster/.cache/go && "
-        "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/tobster/.local/bin:/home/tobster/go/bin && "
-        f"yay -S --needed --noconfirm --noprovides --removemake "
-        f"--answerdiff None --answerclean None "
-        f"--mflags '--noconfirm --skippgpcheck' {package} 2>&1"
-    )
 
 
 def execute_command(command: str, as_user: bool = False):
@@ -633,13 +616,6 @@ def execute_command(command: str, as_user: bool = False):
 
 
 def install_yay():
-    """
-    Builds yay from AUR as user 'tobster'.
-    - Build dir unter /home/tobster (nie /tmp — oft noexec)
-    - Go env vars explizit gesetzt
-    - Volles stdout/stderr Logging
-    - makepkg --syncdeps + --skippgpcheck für headless builds
-    """
     print("\nBuilding yay from AUR...")
 
     BUILD_DIR = "/home/tobster/.cache/yay-build"
@@ -676,39 +652,43 @@ def install_yay():
             env=TOBSTER_ENV,
         )
 
-        if result.stdout:
-            print(result.stdout[-4000:])
-        if result.stderr:
-            print(f"[stderr] {result.stderr[-2000:]}")
-
         if result.returncode != 0:
             raise subprocess.CalledProcessError(result.returncode, "makepkg yay")
 
         print("-> yay successfully installed.")
 
-    except (
-        subprocess.CalledProcessError,
-        RuntimeError,
-        subprocess.TimeoutExpired,
-    ) as e:
+    except Exception as e:
         print(f"Critical: yay could not be built: {e}")
         failed_packages.append("yay")
 
 
+# FIX: Direkter und sauberer Aufruf ohne kompliziertes Bash-String-Parsing
 def yay_install(package: str):
     print(f"\n[yay] Installing: {package}")
     try:
         result = subprocess.run(
-            ["sudo", "-u", "tobster", "bash", "-c", _yay_cmd(package)],
+            [
+                "sudo",
+                "-u",
+                "tobster",
+                "yay",
+                "-S",
+                "--needed",
+                "--noconfirm",
+                "--answerclean",
+                "None",
+                "--answerdiff",
+                "None",
+                package,
+            ],
             capture_output=True,
             text=True,
             timeout=timeout,
             env=TOBSTER_ENV,
         )
-        if result.stdout:
-            print(result.stdout[-3000:])
         if result.returncode != 0:
             print(f"[!] yay failed for {package} (exit {result.returncode})")
+            print(f"Error Log:\n{result.stderr}\n{result.stdout[-1000:]}")
             failed_packages.append(package)
         else:
             print(f"-> {package} installed via yay.")
@@ -735,13 +715,26 @@ def smart_download_package(package: str):
         execute_command(f"pacman -S --needed --noconfirm {package}")
         print(f"-> {package} via pacman.")
         return
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+    except subprocess.CalledProcessError, subprocess.TimeoutExpired:
         pass
 
-    # 2. yay versuchen (mit robusten Flags)
+    # 2. yay versuchen (mit dem gefixten Aufruf)
     try:
         result = subprocess.run(
-            ["sudo", "-u", "tobster", "bash", "-c", _yay_cmd(package)],
+            [
+                "sudo",
+                "-u",
+                "tobster",
+                "yay",
+                "-S",
+                "--needed",
+                "--noconfirm",
+                "--answerclean",
+                "None",
+                "--answerdiff",
+                "None",
+                package,
+            ],
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -750,7 +743,6 @@ def smart_download_package(package: str):
         if result.returncode == 0:
             print(f"-> {package} via yay.")
             return
-        print(f"yay output for {package}:\n{result.stdout[-1000:]}")
     except subprocess.TimeoutExpired:
         pass
 
@@ -762,19 +754,11 @@ def smart_download_package(package: str):
             execute_command(f"flatpak install -y flathub {flatpak_id}")
             print(f"-> {package} via flatpak ({flatpak_id}).")
             return
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+    except subprocess.CalledProcessError, subprocess.TimeoutExpired:
         pass
 
     failed_packages.append(package)
     print(f"Error: '{package}' could not be installed.")
-
-
-def flatpak_install(package: str):
-    try:
-        execute_command(f"flatpak install -y flathub {package}")
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
-        print(f"Flatpak failed for {package}: {getattr(e, 'stderr', '')}")
-        failed_packages.append(package)
 
 
 def clone_git(url: str, dest: str = "/tmp/cloned_repo"):
@@ -820,7 +804,6 @@ def install_oh_my_zsh():
         else:
             print("-> oh-my-zsh installed.")
 
-            # FIX: Fehlende Zsh-Plugins klonen, damit die .zshrc nicht crasht
             print(
                 "-> Installing zsh plugins (autosuggestions & syntax-highlighting)..."
             )
@@ -999,7 +982,7 @@ def autostart():
         "rofi_reload.sh": rofi_wal_postscript_content,
         "ly_reload.sh": ly_wal_postscript_content,
         "gtk_wal_reload.sh": gtk_wal_postscript_content,
-        "alacritty_reload.sh": alacritty_wal_postscript_content,  # FIX: Postscript für Alacritty registriert
+        "alacritty_reload.sh": alacritty_wal_postscript_content,
     }
     for filename, content in scripts.items():
         with open(f"{postscript_dir}/{filename}", "w") as f:
@@ -1017,7 +1000,6 @@ def setup_alacritty():
     with open(f"{config_dir}/alacritty.toml", "w") as f:
         f.write(alacritty_content)
 
-    # FIX: Leere Placeholder-Datei erstellen, damit Alacritty beim allerersten Start vor Pywal nicht crasht
     with open(f"{config_dir}/colors-live.toml", "w") as f:
         f.write("# Fallback empty config until pywal runs\n")
 

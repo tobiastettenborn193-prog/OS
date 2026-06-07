@@ -57,7 +57,7 @@ wintypes:
 };
 """
 
-# FIX: picom erst killen, dann neu starten -> keine Warnings beim Reload
+
 autostart_content = """#!/bin/bash
 pkill picom 2>/dev/null; sleep 0.3
 picom --config ~/.config/picom/picom.conf &
@@ -357,9 +357,6 @@ fi
 """
 
 gtk_wal_postscript_content = """#!/bin/bash
-# Generiert ein minimales GTK3-Theme aus den aktuellen pywal-Farben
-# und zwingt Nemo (und alle anderen GTK-Apps) die neuen Farben zu laden.
-
 source ~/.cache/wal/colors.sh
 
 GTK_CSS="$HOME/.config/gtk-3.0/gtk.css"
@@ -488,7 +485,7 @@ term_reset_cmd = tput reset
 numlock = true
 """
 
-timeout = 5000
+timeout = 10000
 terminal = "alacritty"
 browser = "zen-browser"
 power_menu = "eww"
@@ -504,7 +501,7 @@ before_download = [
     "archlinux-keyring",
     "rust",
     "cargo",
-    "go",  # FIX: für yay build
+    "go",
 ]
 
 download_list = [
@@ -551,6 +548,7 @@ download_list = [
     "bluez-utils",
     "papirus-icon-theme",
     "ly",
+    "wireshark",
 ]
 
 aur_packages = [
@@ -560,16 +558,21 @@ aur_packages = [
     "bibata-cursor-theme",
     "nemo-fileroller",
     "python-pywal16",
+    "prismlauncher",
+    "jdk17-openjdk",
 ]
 
 # <<<-----------------------------------------------------------FUNCTIONS---------------------------------------------------------->>>
 
-# Gemeinsames env für sudo -u tobster Aufrufe
 TOBSTER_ENV = {
     "HOME": "/home/tobster",
     "USER": "tobster",
-    "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/tobster/.local/bin",
+    "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/tobster/.local/bin:/home/tobster/go/bin",
     "TERM": "xterm",
+    "GOPATH": "/home/tobster/go",
+    "GOCACHE": "/home/tobster/.cache/go",
+    "GOPROXY": "https://proxy.golang.org,direct",
+    "XDG_CACHE_HOME": "/home/tobster/.cache",
 }
 
 
@@ -605,21 +608,48 @@ def execute_command(command: str, as_user: bool = False):
 
 
 def install_yay():
+    """
+    Builds yay from AUR as user 'tobster'.
+
+    Fixes vs. old version:
+      - Build dir under /home/tobster (never /tmp — often noexec)
+      - Go env vars set explicitly so the cache is writable
+      - Full stdout/stderr always printed so failures are diagnosable
+      - makepkg --syncdeps ensures missing build-deps are pulled automatically
+      - Cleans stale build dir before every attempt
+    """
     print("\nBuilding yay from AUR...")
+
+    BUILD_DIR = "/home/tobster/.cache/yay-build"
+
     try:
+        # Ensure go + base-devel are present (root can do this)
         execute_command("pacman -S --needed --noconfirm base-devel git go cmake")
-        execute_command("rm -rf /tmp/yay_build")
-        execute_command("mkdir -p /tmp/yay_build")
-        execute_command("chown -R tobster:tobster /tmp/yay_build")
+
+        # Wipe + recreate build dir with correct ownership
+        execute_command(f"rm -rf {BUILD_DIR}")
+        execute_command(f"mkdir -p {BUILD_DIR}")
+        execute_command(f"chown -R tobster:tobster {BUILD_DIR}")
+
+        # Also make sure Go dirs exist and belong to tobster
+        execute_command("mkdir -p /home/tobster/go /home/tobster/.cache/go")
+        execute_command(
+            "chown -R tobster:tobster /home/tobster/go /home/tobster/.cache/go"
+        )
 
         build_cmd = (
+            "export HOME=/home/tobster && "
             "export GOPATH=/home/tobster/go && "
             "export GOCACHE=/home/tobster/.cache/go && "
             "export GOPROXY=https://proxy.golang.org,direct && "
-            "export HOME=/home/tobster && "
-            "cd /tmp/yay_build && "
+            "export PATH=$PATH:/usr/local/go/bin:/home/tobster/go/bin && "
+            f"cd {BUILD_DIR} && "
             "git clone https://aur.archlinux.org/yay.git . && "
-            "makepkg -si --noconfirm --needed 2>&1"
+            # --syncdeps: auto-install missing build deps
+            # --noconfirm: no interactive prompts
+            # --needed: skip already-installed pkgs
+            # 2>&1: merge stderr into stdout so we capture everything
+            "makepkg -si --syncdeps --noconfirm --needed 2>&1"
         )
 
         result = subprocess.run(
@@ -627,12 +657,17 @@ def install_yay():
             capture_output=True,
             text=True,
             timeout=timeout,
+            env=TOBSTER_ENV,
         )
 
+        # Always print output so failures can be read in the log
+        if result.stdout:
+            print(result.stdout[-4000:])
+        if result.stderr:
+            print(f"[stderr] {result.stderr[-2000:]}")
+
         if result.returncode != 0:
-            print(f"yay stdout:\n{result.stdout[-3000:]}")
-            print(f"yay stderr:\n{result.stderr[-3000:]}")
-            raise subprocess.CalledProcessError(result.returncode, "makepkg")
+            raise subprocess.CalledProcessError(result.returncode, "makepkg yay")
 
         print("-> yay successfully installed.")
 
@@ -655,7 +690,13 @@ def yay_install(package: str):
                 "tobster",
                 "bash",
                 "-c",
-                f"HOME=/home/tobster yay -S --needed --noconfirm {package}",
+                (
+                    "export HOME=/home/tobster && "
+                    "export GOPATH=/home/tobster/go && "
+                    "export GOCACHE=/home/tobster/.cache/go && "
+                    "export PATH=$PATH:/home/tobster/go/bin:/home/tobster/.local/bin && "
+                    f"yay -S --needed --noconfirm {package} 2>&1"
+                ),
             ],
             capture_output=True,
             text=True,
@@ -663,7 +704,9 @@ def yay_install(package: str):
             env=TOBSTER_ENV,
         )
         if result.returncode != 0:
-            print(f"yay failed for {package}:\n{result.stderr[-1000:]}")
+            print(
+                f"yay failed for {package}:\n{result.stdout[-1500:]}\n{result.stderr[-500:]}"
+            )
             failed_packages.append(package)
         else:
             print(f"-> {package} installed via yay.")
@@ -688,7 +731,7 @@ def smart_download_package(package: str):
         execute_command(f"pacman -S --needed --noconfirm {package}")
         print(f"-> {package} via pacman.")
         return
-    except subprocess.CalledProcessError, subprocess.TimeoutExpired:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         pass
 
     try:
@@ -699,7 +742,11 @@ def smart_download_package(package: str):
                 "tobster",
                 "bash",
                 "-c",
-                f"HOME=/home/tobster yay -S --needed --noconfirm {package}",
+                (
+                    "export HOME=/home/tobster && "
+                    "export PATH=$PATH:/home/tobster/.local/bin && "
+                    f"yay -S --needed --noconfirm {package} 2>&1"
+                ),
             ],
             capture_output=True,
             text=True,
@@ -719,7 +766,7 @@ def smart_download_package(package: str):
             execute_command(f"flatpak install -y flathub {flatpak_id}")
             print(f"-> {package} via flatpak ({flatpak_id}).")
             return
-    except subprocess.CalledProcessError, subprocess.TimeoutExpired:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         pass
 
     failed_packages.append(package)

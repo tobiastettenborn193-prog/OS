@@ -607,64 +607,32 @@ def execute_command(command: str, as_user: bool = False):
 def install_yay():
     print("\nBuilding yay from AUR...")
     try:
-        # NOPASSWD sicherstellen bevor Build startet
-        execute_command(
-            "sed -i 's/# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) NOPASSWD: ALL/' /etc/sudoers"
-        )
-        execute_command(
-            "sed -i 's/%wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) NOPASSWD: ALL/' /etc/sudoers"
-        )
-
-        execute_command("pacman -S --needed --noconfirm base-devel git go")
+        execute_command("pacman -S --needed --noconfirm base-devel git go cmake")
         execute_command("rm -rf /tmp/yay_build")
         execute_command("mkdir -p /tmp/yay_build")
         execute_command("chown -R tobster:tobster /tmp/yay_build")
 
         build_cmd = (
+            "export GOPATH=/home/tobster/go && "
+            "export GOCACHE=/home/tobster/.cache/go && "
+            "export GOPROXY=https://proxy.golang.org,direct && "
+            "export HOME=/home/tobster && "
             "cd /tmp/yay_build && "
             "git clone https://aur.archlinux.org/yay.git . && "
-            "GOPATH=/home/tobster/go GOCACHE=/home/tobster/.cache/go "
             "makepkg -si --noconfirm --needed 2>&1"
         )
 
         result = subprocess.run(
-            [
-                "sudo",
-                "-u",
-                "tobster",
-                "--preserve-env=HOME,PATH,GOPATH,GOCACHE",
-                "bash",
-                "-c",
-                build_cmd,
-            ],
+            ["sudo", "-u", "tobster", "bash", "-c", build_cmd],
             capture_output=True,
             text=True,
             timeout=timeout,
-            env={
-                **TOBSTER_ENV,
-                "GOPATH": "/home/tobster/go",
-                "GOCACHE": "/home/tobster/.cache/go",
-                "GOPROXY": "https://proxy.golang.org,direct",
-            },
         )
 
         if result.returncode != 0:
             print(f"yay stdout:\n{result.stdout[-3000:]}")
             print(f"yay stderr:\n{result.stderr[-3000:]}")
             raise subprocess.CalledProcessError(result.returncode, "makepkg")
-
-        check = subprocess.run(
-            ["sudo", "-u", "tobster", "which", "yay"],
-            capture_output=True,
-            text=True,
-            env=TOBSTER_ENV,
-        )
-        if check.returncode != 0:
-            raise RuntimeError("yay binary not found after build")
-
-        execute_command(
-            "chown -R tobster:tobster /home/tobster/go /home/tobster/.cache/go 2>/dev/null || true"
-        )
 
         print("-> yay successfully installed.")
 

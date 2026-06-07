@@ -108,9 +108,7 @@ def reload_wal_colors(qtile_obj=None):
         "mem": [("foreground", p["purple"])],
         "vol_icon": [("foreground", p["fg"])],
         "vol": [("foreground", p["fg"])],
-        "wifi_icon": [
-            ("foreground", p["good"])
-        ],  # FIX: nur Icon, kein wifi-widget mehr
+        "wifi_icon": [("foreground", p["good"])],
         "bat": [("foreground", p["good"]), ("low_foreground", p["alert"])],
         "sep_title": [("foreground", p["muted"])],
         "sep_notif": [("foreground", p["muted"])],
@@ -319,6 +317,9 @@ def auto_start():
 FONT = "JetBrainsMono Nerd Font"
 FSIZE = 14
 
+# 70% opak = ~B3 in hex (0xB3 = 179 = 0.70 * 255)
+BAR_BG = "#B3000000"
+
 
 def _gap(n=8):
     return widget.Spacer(length=n)
@@ -326,7 +327,7 @@ def _gap(n=8):
 
 def _pipe(key):
     w = widget.TextBox(
-        text="|", font=FONT, fontsize=FSIZE, foreground=PALETTE["muted"], padding=4
+        text="|", font=FONT, fontsize=FSIZE, foreground=PALETTE["fg"], padding=6
     )
     _LIVE_WIDGETS[key] = w
     return w
@@ -344,12 +345,12 @@ def set_bar():
     p = PALETTE
 
     arch_logo = widget.TextBox(
-        text="󰣇",  # Arch-Logo Nerd Font Icon
+        text="󰣇",
         font=FONT,
         fontsize=18,
         foreground=p["accent"],
         padding=8,
-        mouse_callbacks={"Button1": lambda: None},  # optional: Launcher öffnen
+        mouse_callbacks={"Button1": lambda: None},
     )
     _LIVE_WIDGETS["arch_logo"] = arch_logo
 
@@ -367,7 +368,7 @@ def set_bar():
         active=p["fg"],
         inactive=p["muted"],
         urgent_border=p["alert"],
-        background="#CC000000",
+        background="#00000000",
         disable_drag=True,
         rounded=False,
         use_mouse_wheel=False,
@@ -438,8 +439,6 @@ def set_bar():
         )
     _LIVE_WIDGETS["vol"] = vol
 
-    # FIX: Kein widget.Wlan mehr — nur das Icon als TextBox bleibt
-    # (kein ESSID-Name sichtbar, Icon-Farbe folgt trotzdem pywal)
     wifi_icon = _icon("wifi_icon", "󰤨", "good")
 
     try:
@@ -475,7 +474,6 @@ def set_bar():
     vol_icon = _icon("vol_icon", "", "fg")
 
     blocks = (
-        # FIX: Arch-Logo ganz links vor der GroupBox
         [
             _gap(4),
             arch_logo,
@@ -500,7 +498,7 @@ def set_bar():
             vol,
             _pipe("sep_vol"),
             wifi_icon,
-            _pipe("sep_wifi"),  # FIX: nur Icon, kein ESSID-Widget
+            _pipe("sep_wifi"),
             bat,
             _pipe("sep_bat"),
             curr_layout,
@@ -514,8 +512,8 @@ def set_bar():
         Screen(
             top=bar.Bar(
                 blocks,
-                28,
-                background="#00000000",
+                32,
+                background=BAR_BG,
                 margin=[6, 10, 0, 10],
                 border_width=0,
                 opacity=1.0,

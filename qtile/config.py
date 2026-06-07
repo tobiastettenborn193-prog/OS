@@ -317,8 +317,13 @@ def auto_start():
 FONT = "JetBrainsMono Nerd Font"
 FSIZE = 14
 
-# 70% opak = ~B3 in hex (0xB3 = 179 = 0.70 * 255)
-BAR_BG = "#B3000000"
+
+def _make_bar_bg(alpha_hex: str = "D9") -> str:
+    bg = PALETTE["bg"].lstrip("#")  # z.B. "1a1a2e"
+    return f"#{alpha_hex}{bg}"  # → "#D91a1a2e"
+
+
+BAR_BG = _make_bar_bg("D9")
 
 
 def _gap(n=8):

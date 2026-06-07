@@ -8,9 +8,9 @@ picom_content = """
 # Backend & Performance
 backend = "glx";
 glx-no-stencil = true;
-glx-no-rebind-pixmap = true;
 vsync = true;
 use-damage = true;
+# FIX: glx-no-rebind-pixmap entfernt (deprecated, hat die Warnung verursacht)
 
 # Corners (The Hyprland Look)
 corner-radius = 12;
@@ -56,7 +56,6 @@ wintypes:
   dropdown_menu = { opacity = 0.95; };
 };
 """
-
 
 autostart_content = """#!/bin/bash
 pkill picom 2>/dev/null; sleep 0.3
@@ -133,6 +132,13 @@ fi
 echo "-> Ly config updated with wal colors."
 """
 
+# FIX: Alacritty Postscript um den File-Read-Crash (Race Condition) abzufangen
+alacritty_wal_postscript_content = """#!/bin/bash
+# Atomic copy to prevent Alacritty reading incomplete empty files
+cp ~/.cache/wal/colors-alacritty.toml /tmp/alacritty-live.toml
+mv /tmp/alacritty-live.toml ~/.config/alacritty/colors-live.toml
+"""
+
 starship_content = """
 "$schema" = 'https://starship.rs/config-schema.json'
 
@@ -206,7 +212,8 @@ success_symbol = "[❯](color2)"
 error_symbol = "[❯](color1)"
 """
 
-alacritty_content = """import = ["~/.cache/wal/colors-alacritty.toml"]
+# FIX: Import zeigt jetzt auf colors-live.toml
+alacritty_content = """import = ["~/.config/alacritty/colors-live.toml"]
 
 [window]
 padding.x = 12
@@ -548,7 +555,7 @@ download_list = [
     "bluez-utils",
     "papirus-icon-theme",
     "ly",
-    "wireshark",
+    "wireshark-qt",
 ]
 
 aur_packages = [
@@ -564,16 +571,34 @@ aur_packages = [
 
 # <<<-----------------------------------------------------------FUNCTIONS---------------------------------------------------------->>>
 
+# Vollständiger PATH + alle Env-Vars die makepkg/yay brauchen
 TOBSTER_ENV = {
     "HOME": "/home/tobster",
     "USER": "tobster",
+    "LOGNAME": "tobster",  # makepkg prüft diesen Wert
     "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/tobster/.local/bin:/home/tobster/go/bin",
     "TERM": "xterm",
     "GOPATH": "/home/tobster/go",
     "GOCACHE": "/home/tobster/.cache/go",
     "GOPROXY": "https://proxy.golang.org,direct",
     "XDG_CACHE_HOME": "/home/tobster/.cache",
+    "XDG_RUNTIME_DIR": "/run/user/1000",  # verhindert warnings in makepkg
 }
+
+
+def _yay_cmd(package: str) -> str:
+    """Wiederverwendbarer yay-Befehl mit allen nötigen Flags für non-interaktiven Betrieb."""
+    return (
+        "export HOME=/home/tobster && "
+        "export LOGNAME=tobster && "
+        "export XDG_CACHE_HOME=/home/tobster/.cache && "
+        "export GOPATH=/home/tobster/go && "
+        "export GOCACHE=/home/tobster/.cache/go && "
+        "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/tobster/.local/bin:/home/tobster/go/bin && "
+        f"yay -S --needed --noconfirm --noprovides --removemake "
+        f"--answerdiff None --answerclean None "
+        f"--mflags '--noconfirm --skippgpcheck' {package} 2>&1"
+    )
 
 
 def execute_command(command: str, as_user: bool = False):
@@ -610,28 +635,22 @@ def execute_command(command: str, as_user: bool = False):
 def install_yay():
     """
     Builds yay from AUR as user 'tobster'.
-
-    Fixes vs. old version:
-      - Build dir under /home/tobster (never /tmp — often noexec)
-      - Go env vars set explicitly so the cache is writable
-      - Full stdout/stderr always printed so failures are diagnosable
-      - makepkg --syncdeps ensures missing build-deps are pulled automatically
-      - Cleans stale build dir before every attempt
+    - Build dir unter /home/tobster (nie /tmp — oft noexec)
+    - Go env vars explizit gesetzt
+    - Volles stdout/stderr Logging
+    - makepkg --syncdeps + --skippgpcheck für headless builds
     """
     print("\nBuilding yay from AUR...")
 
     BUILD_DIR = "/home/tobster/.cache/yay-build"
 
     try:
-        # Ensure go + base-devel are present (root can do this)
         execute_command("pacman -S --needed --noconfirm base-devel git go cmake")
 
-        # Wipe + recreate build dir with correct ownership
         execute_command(f"rm -rf {BUILD_DIR}")
         execute_command(f"mkdir -p {BUILD_DIR}")
         execute_command(f"chown -R tobster:tobster {BUILD_DIR}")
 
-        # Also make sure Go dirs exist and belong to tobster
         execute_command("mkdir -p /home/tobster/go /home/tobster/.cache/go")
         execute_command(
             "chown -R tobster:tobster /home/tobster/go /home/tobster/.cache/go"
@@ -639,17 +658,14 @@ def install_yay():
 
         build_cmd = (
             "export HOME=/home/tobster && "
+            "export LOGNAME=tobster && "
             "export GOPATH=/home/tobster/go && "
             "export GOCACHE=/home/tobster/.cache/go && "
             "export GOPROXY=https://proxy.golang.org,direct && "
-            "export PATH=$PATH:/usr/local/go/bin:/home/tobster/go/bin && "
+            "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/go/bin:/home/tobster/go/bin && "
             f"cd {BUILD_DIR} && "
             "git clone https://aur.archlinux.org/yay.git . && "
-            # --syncdeps: auto-install missing build deps
-            # --noconfirm: no interactive prompts
-            # --needed: skip already-installed pkgs
-            # 2>&1: merge stderr into stdout so we capture everything
-            "makepkg -si --syncdeps --noconfirm --needed 2>&1"
+            "makepkg -si --syncdeps --noconfirm --needed --skippgpcheck 2>&1"
         )
 
         result = subprocess.run(
@@ -660,7 +676,6 @@ def install_yay():
             env=TOBSTER_ENV,
         )
 
-        # Always print output so failures can be read in the log
         if result.stdout:
             print(result.stdout[-4000:])
         if result.stderr:
@@ -684,34 +699,21 @@ def yay_install(package: str):
     print(f"\n[yay] Installing: {package}")
     try:
         result = subprocess.run(
-            [
-                "sudo",
-                "-u",
-                "tobster",
-                "bash",
-                "-c",
-                (
-                    "export HOME=/home/tobster && "
-                    "export GOPATH=/home/tobster/go && "
-                    "export GOCACHE=/home/tobster/.cache/go && "
-                    "export PATH=$PATH:/home/tobster/go/bin:/home/tobster/.local/bin && "
-                    f"yay -S --needed --noconfirm {package} 2>&1"
-                ),
-            ],
+            ["sudo", "-u", "tobster", "bash", "-c", _yay_cmd(package)],
             capture_output=True,
             text=True,
             timeout=timeout,
             env=TOBSTER_ENV,
         )
+        if result.stdout:
+            print(result.stdout[-3000:])
         if result.returncode != 0:
-            print(
-                f"yay failed for {package}:\n{result.stdout[-1500:]}\n{result.stderr[-500:]}"
-            )
+            print(f"[!] yay failed for {package} (exit {result.returncode})")
             failed_packages.append(package)
         else:
             print(f"-> {package} installed via yay.")
     except subprocess.TimeoutExpired:
-        print(f"yay timed out for {package}")
+        print(f"yay timed out for {package} (>{timeout}s)")
         failed_packages.append(package)
 
 
@@ -727,6 +729,8 @@ def pacman_install(package: str):
 
 def smart_download_package(package: str):
     print(f"\nInstalling: {package}")
+
+    # 1. pacman versuchen
     try:
         execute_command(f"pacman -S --needed --noconfirm {package}")
         print(f"-> {package} via pacman.")
@@ -734,20 +738,10 @@ def smart_download_package(package: str):
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         pass
 
+    # 2. yay versuchen (mit robusten Flags)
     try:
         result = subprocess.run(
-            [
-                "sudo",
-                "-u",
-                "tobster",
-                "bash",
-                "-c",
-                (
-                    "export HOME=/home/tobster && "
-                    "export PATH=$PATH:/home/tobster/.local/bin && "
-                    f"yay -S --needed --noconfirm {package} 2>&1"
-                ),
-            ],
+            ["sudo", "-u", "tobster", "bash", "-c", _yay_cmd(package)],
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -756,9 +750,11 @@ def smart_download_package(package: str):
         if result.returncode == 0:
             print(f"-> {package} via yay.")
             return
+        print(f"yay output for {package}:\n{result.stdout[-1000:]}")
     except subprocess.TimeoutExpired:
         pass
 
+    # 3. flatpak als letzter Ausweg
     try:
         search = execute_command(f"flatpak search --columns=application {package}")
         if search.strip():
@@ -823,6 +819,20 @@ def install_oh_my_zsh():
             failed_packages.append("oh-my-zsh")
         else:
             print("-> oh-my-zsh installed.")
+
+            # FIX: Fehlende Zsh-Plugins klonen, damit die .zshrc nicht crasht
+            print(
+                "-> Installing zsh plugins (autosuggestions & syntax-highlighting)..."
+            )
+            execute_command(
+                "git clone https://github.com/zsh-users/zsh-autosuggestions /home/tobster/.oh-my-zsh/custom/plugins/zsh-autosuggestions",
+                as_user=True,
+            )
+            execute_command(
+                "git clone https://github.com/zsh-users/zsh-syntax-highlighting.git /home/tobster/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting",
+                as_user=True,
+            )
+
     except subprocess.TimeoutExpired:
         print("oh-my-zsh install timed out.")
         failed_packages.append("oh-my-zsh")
@@ -893,8 +903,7 @@ def setup_locale():
             f.write("LC_TIME=en_US.UTF-8\n")
             f.write("LC_MESSAGES=en_US.UTF-8\n")
 
-        user_locale_dir = "/home/tobster/.config/locale"
-        execute_command(f"mkdir -p {user_locale_dir}")
+        execute_command("mkdir -p /home/tobster/.config/locale")
         with open("/home/tobster/.config/locale.conf", "w") as f:
             f.write("LANG=en_US.UTF-8\n")
         execute_command("chown tobster:tobster /home/tobster/.config/locale.conf")
@@ -990,6 +999,7 @@ def autostart():
         "rofi_reload.sh": rofi_wal_postscript_content,
         "ly_reload.sh": ly_wal_postscript_content,
         "gtk_wal_reload.sh": gtk_wal_postscript_content,
+        "alacritty_reload.sh": alacritty_wal_postscript_content,  # FIX: Postscript für Alacritty registriert
     }
     for filename, content in scripts.items():
         with open(f"{postscript_dir}/{filename}", "w") as f:
@@ -1006,6 +1016,10 @@ def setup_alacritty():
 
     with open(f"{config_dir}/alacritty.toml", "w") as f:
         f.write(alacritty_content)
+
+    # FIX: Leere Placeholder-Datei erstellen, damit Alacritty beim allerersten Start vor Pywal nicht crasht
+    with open(f"{config_dir}/colors-live.toml", "w") as f:
+        f.write("# Fallback empty config until pywal runs\n")
 
     template_dir = "/home/tobster/.config/wal/templates"
     execute_command(f"mkdir -p {template_dir}")
@@ -1033,10 +1047,9 @@ def setup_ly():
         execute_command(f"mkdir -p {ly_config_dir}")
         with open(f"{ly_config_dir}/config.ini", "w") as f:
             f.write(ly_config_content)
-
         execute_command("systemctl enable ly.service")
         execute_command("systemctl disable getty@tty2.service 2>/dev/null || true")
-        print("-> Ly enabled. It will automatically follow pywal colors.")
+        print("-> Ly enabled.")
     except subprocess.CalledProcessError as e:
         print(f"Failed to setup Ly: {e}")
 

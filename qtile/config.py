@@ -46,7 +46,7 @@ def _load_wal():
             with open(WAL_FILE) as f:
                 wal = json.load(f)
             return wal.get("colors", {}), wal.get("special", {})
-        except json.JSONDecodeError, KeyError, OSError:
+        except (json.JSONDecodeError, KeyError, OSError):
             pass
     return {}, {}
 
@@ -96,7 +96,6 @@ def reload_wal_colors(qtile_obj=None):
             ("other_current_screen_border", p["purple"]),
             ("this_screen_border", p["muted"]),
             ("urgent_border", p["alert"]),
-            ("background", "#00000000"),
         ],
         "windowname": [("foreground", p["muted"])],
         "clock_time": [("foreground", p["accent"])],
@@ -128,7 +127,7 @@ def reload_wal_colors(qtile_obj=None):
         for attr, value in attrs:
             try:
                 setattr(w, attr, value)
-            except AttributeError, Exception:
+            except (AttributeError, Exception):
                 pass
         try:
             w.draw()
@@ -319,8 +318,9 @@ FSIZE = 14
 
 
 def _make_bar_bg(alpha_hex: str = "D9") -> str:
-    bg = PALETTE["bg"].lstrip("#")  # z.B. "1a1a2e"
-    return f"#{alpha_hex}{bg}"  # → "#D91a1a2e"
+    # FIX: Fester, neutraler Hintergrund, damit Live-Reloads sauber aussehen
+    bg = "1a1a2e"
+    return f"#{alpha_hex}{bg}"
 
 
 BAR_BG = _make_bar_bg("D9")
@@ -373,7 +373,7 @@ def set_bar():
         active=p["fg"],
         inactive=p["muted"],
         urgent_border=p["alert"],
-        background="#00000000",
+        background=None,  # FIX: Transparenz hier deaktiviert (#00000000 entfernt)
         disable_drag=True,
         rounded=False,
         use_mouse_wheel=False,

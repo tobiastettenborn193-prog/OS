@@ -561,9 +561,11 @@ download_list = [
     "jdk17-openjdk",
     "prismlauncher",
     "librewolf",
+    "olama",
+    "tailscale ",
 ]
 
-# FIX: -bin Anhängsel hinzugefügt, um endlose Build-Schleifen zu verhindern.
+
 aur_packages = [
     "zen-browser-bin",
     "eww-git",
@@ -571,6 +573,7 @@ aur_packages = [
     "bibata-cursor-theme-bin",
     "nemo-fileroller-gitpython-pywal16-git",
     "localsend-bin ",
+    "oh-my-zsh-git",
 ]
 
 # <<<-----------------------------------------------------------FUNCTIONS---------------------------------------------------------->>>
@@ -1066,7 +1069,6 @@ def setup_zsh():
     zshrc_src = "/tmp/OS_config/zsh/zsh.zshrc"
     zshrc_dst = "/home/tobster/.zshrc"
     try:
-        # FIX: Sicherstellen dass zsh in /etc/shells eingetragen ist, sonst lehnt usermod es ab
         execute_command(
             "grep -qxF '/bin/zsh' /etc/shells || echo '/bin/zsh' >> /etc/shells"
         )

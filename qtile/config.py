@@ -318,9 +318,9 @@ FSIZE = 14
 
 
 def _make_bar_bg(alpha_hex: str = "CC") -> str:
-    # FIX: Pures, unmissverständliches Schwarz. Keine Space-Cadet-Farbe mehr!
+    # FIX: Qtile verlangt #RRGGBBAA (Rot, Grün, Blau, Alpha).
     bg = "000000"
-    return f"#{alpha_hex}{bg}"
+    return f"#{bg}{alpha_hex}"
 
 
 BAR_BG = _make_bar_bg("CC")

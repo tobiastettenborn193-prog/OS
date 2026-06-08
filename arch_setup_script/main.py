@@ -7,7 +7,6 @@ import sys
 picom_content = """
 # Backend & Performance
 backend = "glx";
-glx-no-stencil = true;
 vsync = true;
 use-damage = true;
 
@@ -210,7 +209,12 @@ success_symbol = "[❯](color2)"
 error_symbol = "[❯](color1)"
 """
 
+
 alacritty_content = """import = ["~/.config/alacritty/colors-live.toml"]
+
+[shell]
+program = "/bin/zsh"
+args = ["--login"]
 
 [window]
 padding.x = 12
@@ -508,7 +512,7 @@ before_download = [
     "go",
 ]
 
-# FIX: Pakete, die aus dem AUR in die offiziellen Repos gewandert sind, hierher verschoben
+
 download_list = [
     "zsh",
     "starship",
@@ -554,18 +558,19 @@ download_list = [
     "papirus-icon-theme",
     "ly",
     "wireshark-qt",
-    "jdk17-openjdk",  # War vorher im AUR!
-    "prismlauncher",  # War vorher im AUR!
+    "jdk17-openjdk",
+    "prismlauncher",
+    "librewolf",
 ]
 
 # FIX: -bin Anhängsel hinzugefügt, um endlose Build-Schleifen zu verhindern.
 aur_packages = [
     "zen-browser-bin",
-    "eww",
+    "eww-git",
     "windsurf-bin",
     "bibata-cursor-theme-bin",
-    "nemo-fileroller",
-    "python-pywal16",
+    "nemo-fileroller-gitpython-pywal16-git",
+    "localsend-bin ",
 ]
 
 # <<<-----------------------------------------------------------FUNCTIONS---------------------------------------------------------->>>
@@ -715,7 +720,10 @@ def smart_download_package(package: str):
         execute_command(f"pacman -S --needed --noconfirm {package}")
         print(f"-> {package} via pacman.")
         return
-    except subprocess.CalledProcessError, subprocess.TimeoutExpired:
+    except (
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+    ):  # FIX: Python-3-Syntax
         pass
 
     # 2. yay versuchen (mit dem gefixten Aufruf)
@@ -754,7 +762,10 @@ def smart_download_package(package: str):
             execute_command(f"flatpak install -y flathub {flatpak_id}")
             print(f"-> {package} via flatpak ({flatpak_id}).")
             return
-    except subprocess.CalledProcessError, subprocess.TimeoutExpired:
+    except (
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+    ):  # FIX: Python-3-Syntax
         pass
 
     failed_packages.append(package)
@@ -1055,9 +1066,17 @@ def setup_zsh():
     zshrc_src = "/tmp/OS_config/zsh/zsh.zshrc"
     zshrc_dst = "/home/tobster/.zshrc"
     try:
+        # FIX: Sicherstellen dass zsh in /etc/shells eingetragen ist, sonst lehnt usermod es ab
+        execute_command(
+            "grep -qxF '/bin/zsh' /etc/shells || echo '/bin/zsh' >> /etc/shells"
+        )
         execute_command(f"cp {zshrc_src} {zshrc_dst}")
         execute_command(f"chown tobster:tobster {zshrc_dst}")
         execute_command("usermod -s /bin/zsh tobster")
+        # FIX: Direkt in /etc/passwd patchen als Fallback, falls usermod still schweigt
+        execute_command(
+            "sed -i 's|\\(tobster:x:[^:]*:[^:]*:[^:]*:[^:]*:\\)/bin/bash|\\1/bin/zsh|' /etc/passwd"
+        )
         print("-> Zsh configured and set as default shell.")
     except subprocess.CalledProcessError as e:
         print(f"Warning: Could not setup Zsh properly. Error: {e}")

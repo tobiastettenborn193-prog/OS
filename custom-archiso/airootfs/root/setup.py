@@ -628,33 +628,25 @@ def execute_command(command: str, as_user: bool = False):
         raise subprocess.CalledProcessError(e.returncode, e.cmd, e.output, e.stderr)
 
 
+# FIX: yay-bin statt yay, umfliegt den Go-Compiler
 def install_yay():
-    print("\nBuilding yay from AUR...")
+    print("\nBuilding yay-bin from AUR...")
 
     BUILD_DIR = "/home/tobster/.cache/yay-build"
 
     try:
-        execute_command("pacman -S --needed --noconfirm base-devel git go cmake")
+        execute_command("pacman -S --needed --noconfirm base-devel git")
 
         execute_command(f"rm -rf {BUILD_DIR}")
         execute_command(f"mkdir -p {BUILD_DIR}")
         execute_command(f"chown -R tobster:tobster {BUILD_DIR}")
 
-        execute_command("mkdir -p /home/tobster/go /home/tobster/.cache/go")
-        execute_command(
-            "chown -R tobster:tobster /home/tobster/go /home/tobster/.cache/go"
-        )
-
         build_cmd = (
             "export HOME=/home/tobster && "
-            "export LOGNAME=tobster && "
-            "export GOPATH=/home/tobster/go && "
-            "export GOCACHE=/home/tobster/.cache/go && "
-            "export GOPROXY=https://proxy.golang.org,direct && "
-            "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/go/bin:/home/tobster/go/bin && "
+            "export USER=tobster && "
             f"cd {BUILD_DIR} && "
-            "git clone https://aur.archlinux.org/yay.git . && "
-            "makepkg -si --syncdeps --noconfirm --needed --skippgpcheck 2>&1"
+            "git clone https://aur.archlinux.org/yay-bin.git . && "
+            "makepkg -si --noconfirm 2>&1"
         )
 
         result = subprocess.run(
@@ -666,7 +658,8 @@ def install_yay():
         )
 
         if result.returncode != 0:
-            raise subprocess.CalledProcessError(result.returncode, "makepkg yay")
+            print(f"[!] makepkg output:\n{result.stdout}\n{result.stderr}")
+            raise subprocess.CalledProcessError(result.returncode, "makepkg yay-bin")
 
         print("-> yay successfully installed.")
 
@@ -1053,6 +1046,7 @@ def setup_alacritty():
     config_dir = "/home/tobster/.config/alacritty"
     execute_command(f"mkdir -p {config_dir}")
 
+    # FIX: Das Script überschreibt nun hart die Alacritty Config
     with open(f"{config_dir}/alacritty.toml", "w") as f:
         f.write(alacritty_content)
 

@@ -130,7 +130,6 @@ fi
 echo "-> Ly config updated with wal colors."
 """
 
-# FIX: Cat statt cp/mv erhält die Inode der Datei aufrecht, was Alacritty nicht crashen lässt!
 alacritty_wal_postscript_content = """#!/bin/bash
 cat ~/.cache/wal/colors-alacritty.toml > ~/.config/alacritty/colors-live.toml
 touch ~/.config/alacritty/colors-live.toml
@@ -208,7 +207,6 @@ format = "[⏱ $duration]($style) "
 success_symbol = "[❯](color2)"
 error_symbol = "[❯](color1)"
 """
-
 
 alacritty_content = """import = ["~/.config/alacritty/colors-live.toml"]
 
@@ -519,6 +517,7 @@ download_list = [
     terminal,
     application_launcher,
     file_manager,
+    "nemo-fileroller",  # Verschoben aus AUR
     "picom",
     "lib32-libva-mesa-driver",
     "libva-mesa-driver",
@@ -562,17 +561,18 @@ download_list = [
     "prismlauncher",
     "librewolf",
     "olama",
-    "tailscale ",
+    "tailscale",
+    "obsidian",
+    "brightnessctl",
+    "btop",
+    "fzf",
 ]
-
 
 aur_packages = [
     "zen-browser-bin",
-    "eww-git",
     "windsurf-bin",
     "bibata-cursor-theme-bin",
-    "nemo-fileroller-gitpython-pywal16-git",
-    "localsend-bin ",
+    "localsend-bin",
     "oh-my-zsh-git",
 ]
 
@@ -670,7 +670,6 @@ def install_yay():
         failed_packages.append("yay")
 
 
-# FIX: Direkter und sauberer Aufruf ohne kompliziertes Bash-String-Parsing
 def yay_install(package: str):
     print(f"\n[yay] Installing: {package}")
     try:
@@ -718,18 +717,13 @@ def pacman_install(package: str):
 def smart_download_package(package: str):
     print(f"\nInstalling: {package}")
 
-    # 1. pacman versuchen
     try:
         execute_command(f"pacman -S --needed --noconfirm {package}")
         print(f"-> {package} via pacman.")
         return
-    except (
-        subprocess.CalledProcessError,
-        subprocess.TimeoutExpired,
-    ):  # FIX: Python-3-Syntax
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         pass
 
-    # 2. yay versuchen (mit dem gefixten Aufruf)
     try:
         result = subprocess.run(
             [
@@ -757,7 +751,6 @@ def smart_download_package(package: str):
     except subprocess.TimeoutExpired:
         pass
 
-    # 3. flatpak als letzter Ausweg
     try:
         search = execute_command(f"flatpak search --columns=application {package}")
         if search.strip():
@@ -765,10 +758,7 @@ def smart_download_package(package: str):
             execute_command(f"flatpak install -y flathub {flatpak_id}")
             print(f"-> {package} via flatpak ({flatpak_id}).")
             return
-    except (
-        subprocess.CalledProcessError,
-        subprocess.TimeoutExpired,
-    ):  # FIX: Python-3-Syntax
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         pass
 
     failed_packages.append(package)
@@ -793,6 +783,13 @@ def install_aur_packages():
     print("\n--- Installing AUR-only packages ---")
     for package in aur_packages:
         yay_install(package)
+
+
+def install_eww():
+    print("\n--- Installing eww-git ---")
+    # eww-git baut über Cargo und erfordert ggf. zusätzliche Schlüssel.
+    # Durch den separierten Call wird die Standardinstallation nicht blockiert.
+    yay_install("eww-git")
 
 
 def install_oh_my_zsh():
@@ -916,6 +913,46 @@ def setup_locale():
         print("-> System locale set to en_US.UTF-8 (keyboard layout stays German).")
     except Exception as e:
         print(f"Failed to set locale: {e}")
+
+
+def setup_firewall():
+    print("\nConfiguring UFW Firewall...")
+    try:
+        pacman_install("ufw")
+        execute_command("ufw default deny incoming")
+        execute_command("ufw default allow outgoing")
+        execute_command("ufw allow 53317/tcp")
+        execute_command("ufw allow 53317/udp")
+        execute_command("ufw logging on")
+        execute_command("ufw --force enable")
+        execute_command("systemctl enable ufw.service")
+        print("-> Firewall activated and configured.")
+    except Exception as e:
+        print(f"Failed to setup firewall: {e}")
+
+
+def setup_opsec():
+    print("\nApplying Security Hardening (OpSec)...")
+    sysctl_conf = """# Restrict dmesg access to root
+kernel.dmesg_restrict = 1
+
+# Enable TCP syncookies (prevents SYN flood attacks)
+net.ipv4.tcp_syncookies = 1
+
+# Ignore ICMP echo requests (Ping)
+net.ipv4.icmp_echo_ignore_all = 1
+"""
+    try:
+        with open("/etc/sysctl.d/99-opsec.conf", "w") as f:
+            f.write(sysctl_conf)
+        execute_command("sysctl --system")
+
+        with open("/etc/profile.d/99-umask.sh", "w") as f:
+            f.write("umask 027\n")
+        execute_command("chmod +x /etc/profile.d/99-umask.sh")
+        print("-> Sysctl network limits and Umask 027 applied.")
+    except Exception as e:
+        print(f"Failed to apply OpSec: {e}")
 
 
 def picom_config():
@@ -1043,9 +1080,9 @@ def setup_ly():
         execute_command(f"mkdir -p {ly_config_dir}")
         with open(f"{ly_config_dir}/config.ini", "w") as f:
             f.write(ly_config_content)
-        execute_command("systemctl enable ly.service")
         execute_command("systemctl disable getty@tty2.service 2>/dev/null || true")
-        print("-> Ly enabled.")
+        execute_command("systemctl enable ly@tty2.service")
+        print("-> Ly enabled on TTY2.")
     except subprocess.CalledProcessError as e:
         print(f"Failed to setup Ly: {e}")
 
@@ -1075,7 +1112,6 @@ def setup_zsh():
         execute_command(f"cp {zshrc_src} {zshrc_dst}")
         execute_command(f"chown tobster:tobster {zshrc_dst}")
         execute_command("usermod -s /bin/zsh tobster")
-        # FIX: Direkt in /etc/passwd patchen als Fallback, falls usermod still schweigt
         execute_command(
             "sed -i 's|\\(tobster:x:[^:]*:[^:]*:[^:]*:[^:]*:\\)/bin/bash|\\1/bin/zsh|' /etc/passwd"
         )
@@ -1118,10 +1154,13 @@ def setup_networkmanager():
 def main():
     try:
         setup_system_basics()
+        setup_opsec()
+        setup_firewall()
         install_before_packages()
         install_yay()
         install_packages()
         install_aur_packages()
+        install_eww()
         install_oh_my_zsh()
         qtile_config()
         detect_wifi_interface()

@@ -33,6 +33,7 @@ file_manager = "nemo"
 screenshot_tool = "spectacle"
 power_menu = "eww"
 application_launcher = "rofi"
+system_monitor = "btop"
 
 """<<< ---------------------------------------------------- PYWAL ---------------------------------------------------- >>>"""
 
@@ -184,8 +185,22 @@ def _start_wal_watcher():
 """<<< -------------------------------------------------- FUNCTIONS -------------------------------------------------- >>>"""
 
 
+def _trigger_postscripts():
+    """Führt die Reload-Scripte sicher aus, z.B. für Alacritty (Inode Fix) und GTK."""
+    scripts = [
+        os.path.expanduser("~/.config/wal/postscripts/alacritty_reload.sh"),
+        os.path.expanduser("~/.config/wal/postscripts/rofi_reload.sh"),
+        os.path.expanduser("~/.config/wal/postscripts/gtk_wal_reload.sh"),
+        os.path.expanduser("~/.config/wal/postscripts/cursor_reload.sh"),
+        os.path.expanduser("~/.config/wal/postscripts/starship_reload.sh"),
+    ]
+    for script in scripts:
+        if os.path.exists(script):
+            subprocess.run([script], capture_output=True)
+
+
 def change_wallpaper(qtile_obj=None):
-    """Pick a random wallpaper, run pywal."""
+    """Pick a random wallpaper, run pywal quietly, then trigger postscripts."""
     wall_dir = os.path.expanduser("~/.wallpapers")
     os.makedirs(wall_dir, exist_ok=True)
     files = [
@@ -194,7 +209,12 @@ def change_wallpaper(qtile_obj=None):
     if not files:
         return
     full_path = os.path.join(wall_dir, random.choice(files))
-    subprocess.Popen(["wal", "-i", full_path])
+
+    # Wal im quiet-Modus ausführen, damit es uns nicht das Terminal vollspammt
+    subprocess.run(["wal", "-q", "-i", full_path])
+
+    # Der Alacritty / Inode Fix
+    _trigger_postscripts()
 
 
 def safe_restart(qtile_obj=None):
@@ -215,10 +235,10 @@ def safe_restart(qtile_obj=None):
 keys = [
     Key([mod], "Return", lazy.spawn(terminal), desc="Terminal"),
     Key([mod], "BackSpace", lazy.spawn(browser), desc="Browser"),
+    Key([mod], "b", lazy.spawn(system_monitor), desc="btop"),
     Key([mod], "f", lazy.spawn(file_manager), desc="Files"),
     Key([mod, fn], "p", lazy.spawn(power_menu), desc="Power menu"),
     Key([fn], "p", lazy.spawn(screenshot_tool), desc="Screenshot"),
-    Key([fn, "shift"], "c", lazy.spawn("wal -i ~/.wallpapers"), desc="Rerun pywal"),
     Key(
         [mod],
         "space",
@@ -231,6 +251,41 @@ keys = [
         lazy.spawn(f"{browser} -new-tab https://gemini.google.com/app"),
         desc="Gemini",
     ),
+    # Media & System Controls (Neu hinzugefügt)
+    Key(
+        [],
+        "XF86AudioRaiseVolume",
+        lazy.spawn("pactl set-sink-volume @DEFAULT_SINK@ +5%"),
+        desc="Volume Up",
+    ),
+    Key(
+        [],
+        "XF86AudioLowerVolume",
+        lazy.spawn("pactl set-sink-volume @DEFAULT_SINK@ -5%"),
+        desc="Volume Down",
+    ),
+    Key(
+        [],
+        "XF86AudioMute",
+        lazy.spawn("pactl set-sink-mute @DEFAULT_SINK@ toggle"),
+        desc="Volume Mute",
+    ),
+    Key([], "XF86AudioPlay", lazy.spawn("playerctl play-pause"), desc="Play/Pause"),
+    Key([], "XF86AudioNext", lazy.spawn("playerctl next"), desc="Next Track"),
+    Key([], "XF86AudioPrev", lazy.spawn("playerctl previous"), desc="Prev Track"),
+    Key(
+        [],
+        "XF86MonBrightnessUp",
+        lazy.spawn("brightnessctl set +5%"),
+        desc="Brightness Up",
+    ),
+    Key(
+        [],
+        "XF86MonBrightnessDown",
+        lazy.spawn("brightnessctl set 5%-"),
+        desc="Brightness Down",
+    ),
+    # Window Management
     Key([mod], "Right", lazy.screen.next_group()),
     Key([mod], "Left", lazy.screen.prev_group()),
     Key([fn], "f", lazy.window.toggle_floating()),
@@ -298,7 +353,8 @@ def auto_start():
         ]
         if files:
             random_wall = os.path.join(wall_dir, random.choice(files))
-            subprocess.Popen(["wal", "-i", random_wall])
+            subprocess.run(["wal", "-q", "-i", random_wall])
+            _trigger_postscripts()
 
     subprocess.Popen(["picom", "-b"])
     subprocess.Popen(["setxkbmap", "de"])
@@ -318,12 +374,12 @@ FSIZE = 14
 
 
 def _make_bar_bg(alpha_hex: str = "CC") -> str:
-    # FIX: Qtile verlangt #RRGGBBAA (Rot, Grün, Blau, Alpha).
     bg = "000000"
     return f"#{bg}{alpha_hex}"
 
 
-BAR_BG = _make_bar_bg("CC")
+# Hier ist die Transparenz! CC -> 80%. B3 -> 70% (etwas transparenter).
+BAR_BG = _make_bar_bg("B3")
 
 
 def _gap(n=8):
@@ -331,8 +387,9 @@ def _gap(n=8):
 
 
 def _pipe(key):
+    # Dünnerer, eleganterer Trennstrich statt dem fetten "|"
     w = widget.TextBox(
-        text="|", font=FONT, fontsize=FSIZE, foreground=PALETTE["fg"], padding=6
+        text="│", font=FONT, fontsize=FSIZE, foreground=PALETTE["muted"], padding=6
     )
     _LIVE_WIDGETS[key] = w
     return w
@@ -373,7 +430,7 @@ def set_bar():
         active=p["fg"],
         inactive=p["muted"],
         urgent_border=p["alert"],
-        background=None,  # FIX: Transparenz hier deaktiviert
+        background=None,
         disable_drag=True,
         rounded=False,
         use_mouse_wheel=False,
@@ -416,11 +473,13 @@ def set_bar():
     )
     _LIVE_WIDGETS["clock_date"] = clk_date
 
+    # --- Fancy & Reliable System Widgets ---
+
     cpu = widget.CPU(
         font=FONT,
         fontsize=FSIZE,
         foreground=p["warn"],
-        format="{load_percent:.0f}%",
+        format="{load_percent:02.0f}%",  # Feste Breite gegen Jitter
         update_interval=2,
         padding=0,
     )
@@ -430,37 +489,44 @@ def set_bar():
         font=FONT,
         fontsize=FSIZE,
         foreground=p["purple"],
-        format="{MemPercent:.0f}%",
+        format="{MemPercent:02.0f}%",  # Feste Breite gegen Jitter
         update_interval=2,
         padding=0,
     )
     _LIVE_WIDGETS["mem"] = mem
 
     try:
-        vol = widget.Volume(font=FONT, fontsize=FSIZE, foreground=p["fg"], padding=0)
+        # PulseVolume ist auf modernen Pipewire-Systemen viel verlässlicher!
+        vol = widget.PulseVolume(
+            font=FONT,
+            fontsize=FSIZE,
+            foreground=p["fg"],
+            padding=0,
+            update_interval=0.1,
+            limit_max_volume=True,
+        )
     except Exception:
         vol = widget.TextBox(
             text="vol?", font=FONT, fontsize=FSIZE, foreground=p["muted"], padding=0
         )
     _LIVE_WIDGETS["vol"] = vol
 
-    wifi_icon = _icon("wifi_icon", "󰤨", "good")
-
     try:
         bat = widget.Battery(
             font=FONT,
             fontsize=FSIZE,
             format="{char} {percent:2.0%}",
-            charge_char="",
-            discharge_char="",
-            full_char="",
-            unknown_char="?",
-            empty_char="",
+            charge_char="󰂄",
+            discharge_char="󰁹",
+            full_char="󰁹",
+            empty_char="󰂎",
+            unknown_char="󰂑",
             low_percentage=0.2,
             low_foreground=p["alert"],
             foreground=p["good"],
             notify_below=20,
             padding=0,
+            update_interval=5,
         )
     except Exception:
         bat = widget.TextBox(
@@ -473,10 +539,11 @@ def set_bar():
     )
     _LIVE_WIDGETS["current_layout"] = curr_layout
 
-    notif_icon = _icon("notif_icon", "", "muted")
-    cpu_icon = _icon("cpu_icon", "", "warn")
-    mem_icon = _icon("mem_icon", "", "purple")
-    vol_icon = _icon("vol_icon", "", "fg")
+    # Fancy Icons
+    cpu_icon = _icon("cpu_icon", " ", "warn")
+    mem_icon = _icon("mem_icon", " ", "purple")
+    vol_icon = _icon("vol_icon", " ", "fg")
+    wifi_icon = _icon("wifi_icon", "󰤨 ", "good")
 
     blocks = (
         [
@@ -491,8 +558,6 @@ def set_bar():
         ]
         + [widget.Spacer(), clk_time, clk_sep, clk_date, widget.Spacer()]
         + [
-            notif_icon,
-            _pipe("sep_notif"),
             cpu_icon,
             cpu,
             _gap(4),
@@ -503,12 +568,11 @@ def set_bar():
             vol,
             _pipe("sep_vol"),
             wifi_icon,
-            _pipe("sep_wifi"),
-            bat,
+            bat,  # Hat jetzt sein eigenes Lade-Icon integriert!
             _pipe("sep_bat"),
             curr_layout,
             _pipe("sep_layout"),
-            widget.Systray(padding=6),
+            widget.Systray(padding=8, icon_size=18),
             _gap(10),
         ]
     )

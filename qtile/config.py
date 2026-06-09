@@ -251,7 +251,7 @@ keys = [
         lazy.spawn(f"{browser} -new-tab https://gemini.google.com/app"),
         desc="Gemini",
     ),
-    # Media & System Controls (Neu hinzugefügt)
+    # Media & System Controls
     Key(
         [],
         "XF86AudioRaiseVolume",

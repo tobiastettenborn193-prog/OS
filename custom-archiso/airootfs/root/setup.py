@@ -208,7 +208,8 @@ success_symbol = "[❯](color2)"
 error_symbol = "[❯](color1)"
 """
 
-alacritty_content = """import = ["~/.config/alacritty/colors-live.toml"]
+alacritty_content = """[general]
+import = ["~/.config/alacritty/colors-live.toml"]
 
 [shell]
 program = "/bin/zsh"
@@ -517,7 +518,7 @@ download_list = [
     terminal,
     application_launcher,
     file_manager,
-    "nemo-fileroller",  # Verschoben aus AUR
+    "nemo-fileroller",
     "picom",
     "lib32-libva-mesa-driver",
     "libva-mesa-driver",
@@ -566,6 +567,9 @@ download_list = [
     "brightnessctl",
     "btop",
     "fzf",
+    "yazi",
+    "playerctl",
+    "python-pulsectl-asyncio",
 ]
 
 aur_packages = [
@@ -574,6 +578,7 @@ aur_packages = [
     "bibata-cursor-theme-bin",
     "localsend-bin",
     "oh-my-zsh-git",
+    "zellij",
 ]
 
 # <<<-----------------------------------------------------------FUNCTIONS---------------------------------------------------------->>>

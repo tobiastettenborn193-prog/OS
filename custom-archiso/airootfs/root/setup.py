@@ -1093,11 +1093,22 @@ def setup_mullvad_and_permissions():
         execute_command("systemctl enable mullvad-daemon.service")
         print("-> Mullvad daemon enabled.")
     except Exception:
-        pass
+        print("-> [!] Warning: Mullvad daemon could not be enabled.")
+
     # TTY / ESP32 Flashing Permissions
-    execute_command("usermod -aG uucp tobster")
-    execute_command("usermod -aG dialout tobster")
-    print("-> User added to uucp and dialout groups for ESP32 flashing.")
+    try:
+        execute_command("usermod -aG uucp tobster")
+        print("-> User added to uucp group for ESP32 flashing.")
+    except Exception as e:
+        print(f"-> [!] Could not add to uucp: {e}")
+
+    try:
+        # Checkt ob dialout existiert, wenn nicht, wird es erstellt (für maximale Kompatibilität)
+        execute_command("grep -q '^dialout:' /etc/group || groupadd dialout")
+        execute_command("usermod -aG dialout tobster")
+        print("-> User added to dialout group.")
+    except Exception:
+        pass
 
 
 def create_helper_scripts():

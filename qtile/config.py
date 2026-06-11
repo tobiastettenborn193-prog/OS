@@ -31,7 +31,7 @@ terminal = "alacritty"
 browser = "zen-browser"
 file_manager = "nemo"
 screenshot_tool = "spectacle"
-power_menu = "eww"
+power_menu = "/home/tobster/.local/bin/powermenu.sh"
 application_launcher = "rofi"
 system_monitor = "btop"
 
@@ -47,7 +47,7 @@ def _load_wal():
             with open(WAL_FILE) as f:
                 wal = json.load(f)
             return wal.get("colors", {}), wal.get("special", {})
-        except json.JSONDecodeError, KeyError, OSError:
+        except (json.JSONDecodeError, KeyError, OSError):
             pass
     return {}, {}
 
@@ -128,7 +128,7 @@ def reload_wal_colors(qtile_obj=None):
         for attr, value in attrs:
             try:
                 setattr(w, attr, value)
-            except AttributeError, Exception:
+            except (AttributeError, Exception):
                 pass
         try:
             w.draw()
@@ -193,6 +193,7 @@ def _trigger_postscripts():
         os.path.expanduser("~/.config/wal/postscripts/gtk_wal_reload.sh"),
         os.path.expanduser("~/.config/wal/postscripts/cursor_reload.sh"),
         os.path.expanduser("~/.config/wal/postscripts/starship_reload.sh"),
+        os.path.expanduser("~/.config/wal/postscripts/dunst_reload.sh"),
     ]
     for script in scripts:
         if os.path.exists(script):
@@ -210,10 +211,7 @@ def change_wallpaper(qtile_obj=None):
         return
     full_path = os.path.join(wall_dir, random.choice(files))
 
-    # Wal im quiet-Modus ausführen, damit es uns nicht das Terminal vollspammt
     subprocess.run(["wal", "-q", "-i", full_path])
-
-    # Der Alacritty / Inode Fix
     _trigger_postscripts()
 
 
@@ -235,7 +233,7 @@ def safe_restart(qtile_obj=None):
 keys = [
     Key([mod], "Return", lazy.spawn(terminal), desc="Terminal"),
     Key([mod], "BackSpace", lazy.spawn(browser), desc="Browser"),
-    Key([mod], "b", lazy.spawn(system_monitor), desc="btop"),
+    Key([mod], "b", lazy.spawn(f"{terminal} -e {system_monitor}"), desc="btop"),
     Key([mod], "f", lazy.spawn(file_manager), desc="Files"),
     Key([mod, fn], "p", lazy.spawn(power_menu), desc="Power menu"),
     Key([fn], "p", lazy.spawn(screenshot_tool), desc="Screenshot"),
@@ -255,19 +253,19 @@ keys = [
     Key(
         [],
         "XF86AudioRaiseVolume",
-        lazy.spawn("pactl set-sink-volume @DEFAULT_SINK@ +5%"),
+        lazy.spawn("/home/tobster/.local/bin/volume.sh up"),
         desc="Volume Up",
     ),
     Key(
         [],
         "XF86AudioLowerVolume",
-        lazy.spawn("pactl set-sink-volume @DEFAULT_SINK@ -5%"),
+        lazy.spawn("/home/tobster/.local/bin/volume.sh down"),
         desc="Volume Down",
     ),
     Key(
         [],
         "XF86AudioMute",
-        lazy.spawn("pactl set-sink-mute @DEFAULT_SINK@ toggle"),
+        lazy.spawn("/home/tobster/.local/bin/volume.sh mute"),
         desc="Volume Mute",
     ),
     Key([], "XF86AudioPlay", lazy.spawn("playerctl play-pause"), desc="Play/Pause"),
@@ -357,8 +355,7 @@ def auto_start():
             _trigger_postscripts()
 
     subprocess.Popen(["picom", "-b"])
-    subprocess.Popen(["setxkbmap", "de"])
-    subprocess.Popen(["eww", "daemon"])
+    subprocess.Popen(["dunst"])
     subprocess.Popen(
         ["xrandr", "--output", "eDP-1", "--mode", "1920x1080", "--pos", "0x0"]
     )
@@ -378,7 +375,6 @@ def _make_bar_bg(alpha_hex: str = "CC") -> str:
     return f"#{bg}{alpha_hex}"
 
 
-# Hier ist die Transparenz! CC -> 80%. B3 -> 70% (etwas transparenter).
 BAR_BG = _make_bar_bg("B3")
 
 
@@ -387,7 +383,6 @@ def _gap(n=8):
 
 
 def _pipe(key):
-    # Dünnerer, eleganterer Trennstrich statt dem fetten "|"
     w = widget.TextBox(
         text="│", font=FONT, fontsize=FSIZE, foreground=PALETTE["muted"], padding=6
     )
@@ -473,13 +468,11 @@ def set_bar():
     )
     _LIVE_WIDGETS["clock_date"] = clk_date
 
-    # --- Fancy & Reliable System Widgets ---
-
     cpu = widget.CPU(
         font=FONT,
         fontsize=FSIZE,
         foreground=p["warn"],
-        format="{load_percent:02.0f}%",  # Feste Breite gegen Jitter
+        format="{load_percent:02.0f}%",
         update_interval=2,
         padding=0,
     )
@@ -489,14 +482,13 @@ def set_bar():
         font=FONT,
         fontsize=FSIZE,
         foreground=p["purple"],
-        format="{MemPercent:02.0f}%",  # Feste Breite gegen Jitter
+        format="{MemPercent:02.0f}%",
         update_interval=2,
         padding=0,
     )
     _LIVE_WIDGETS["mem"] = mem
 
     try:
-        # PulseVolume ist auf modernen Pipewire-Systemen viel verlässlicher!
         vol = widget.PulseVolume(
             font=FONT,
             fontsize=FSIZE,
@@ -539,7 +531,6 @@ def set_bar():
     )
     _LIVE_WIDGETS["current_layout"] = curr_layout
 
-    # Fancy Icons
     cpu_icon = _icon("cpu_icon", " ", "warn")
     mem_icon = _icon("mem_icon", " ", "purple")
     vol_icon = _icon("vol_icon", " ", "fg")
@@ -568,7 +559,7 @@ def set_bar():
             vol,
             _pipe("sep_vol"),
             wifi_icon,
-            bat,  # Hat jetzt sein eigenes Lade-Icon integriert!
+            bat,
             _pipe("sep_bat"),
             curr_layout,
             _pipe("sep_layout"),

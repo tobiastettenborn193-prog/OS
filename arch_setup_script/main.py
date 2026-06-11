@@ -135,6 +135,12 @@ cat ~/.cache/wal/colors-alacritty.toml > ~/.config/alacritty/colors-live.toml
 touch ~/.config/alacritty/colors-live.toml
 """
 
+dunst_wal_postscript_content = """#!/bin/bash
+mkdir -p ~/.config/dunst
+ln -sf ~/.cache/wal/dunstrc ~/.config/dunst/dunstrc
+killall dunst
+"""
+
 starship_content = """
 "$schema" = 'https://starship.rs/config-schema.json'
 
@@ -509,8 +515,8 @@ before_download = [
     "rust",
     "cargo",
     "go",
+    "reflector",  # Added to fix mirror resolution issues
 ]
-
 
 download_list = [
     "zsh",
@@ -546,6 +552,7 @@ download_list = [
     "fastfetch",
     "spectacle",
     "dunst",
+    "libnotify",  # Added for dunstify / notify-send volume OSD
     "feh",
     "polkit-gnome",
     "wireplumber",
@@ -570,6 +577,7 @@ download_list = [
     "yazi",
     "playerctl",
     "python-pulsectl-asyncio",
+    "esptool",  # Added for ESP32 TTY flashing
 ]
 
 aur_packages = [
@@ -579,6 +587,7 @@ aur_packages = [
     "localsend-bin",
     "oh-my-zsh-git",
     "zellij",
+    "mullvad-vpn-bin",  # Added Mullvad VPN
 ]
 
 # <<<-----------------------------------------------------------FUNCTIONS---------------------------------------------------------->>>
@@ -628,19 +637,27 @@ def execute_command(command: str, as_user: bool = False):
         raise subprocess.CalledProcessError(e.returncode, e.cmd, e.output, e.stderr)
 
 
-# FIX: yay-bin statt yay, umfliegt den Go-Compiler
+def update_mirrors():
+    print("\nUpdating Pacman Mirrors (Fixing 'failed retrieving file' errors)...")
+    try:
+        execute_command("pacman -S --needed --noconfirm reflector")
+        execute_command(
+            "reflector --latest 10 --protocol https --sort rate --save /etc/pacman.d/mirrorlist"
+        )
+        execute_command("pacman -Syy")
+        print("-> Mirrors successfully updated.")
+    except Exception as e:
+        print(f"Failed to update mirrors: {e}")
+
+
 def install_yay():
     print("\nBuilding yay-bin from AUR...")
-
     BUILD_DIR = "/home/tobster/.cache/yay-build"
-
     try:
         execute_command("pacman -S --needed --noconfirm base-devel git")
-
         execute_command(f"rm -rf {BUILD_DIR}")
         execute_command(f"mkdir -p {BUILD_DIR}")
         execute_command(f"chown -R tobster:tobster {BUILD_DIR}")
-
         build_cmd = (
             "export HOME=/home/tobster && "
             "export USER=tobster && "
@@ -648,7 +665,6 @@ def install_yay():
             "git clone https://aur.archlinux.org/yay-bin.git . && "
             "makepkg -si --noconfirm 2>&1"
         )
-
         result = subprocess.run(
             ["sudo", "-u", "tobster", "bash", "-c", build_cmd],
             capture_output=True,
@@ -656,13 +672,10 @@ def install_yay():
             timeout=timeout,
             env=TOBSTER_ENV,
         )
-
         if result.returncode != 0:
             print(f"[!] makepkg output:\n{result.stdout}\n{result.stderr}")
             raise subprocess.CalledProcessError(result.returncode, "makepkg yay-bin")
-
         print("-> yay successfully installed.")
-
     except Exception as e:
         print(f"Critical: yay could not be built: {e}")
         failed_packages.append("yay")
@@ -714,14 +727,12 @@ def pacman_install(package: str):
 
 def smart_download_package(package: str):
     print(f"\nInstalling: {package}")
-
     try:
         execute_command(f"pacman -S --needed --noconfirm {package}")
         print(f"-> {package} via pacman.")
         return
-    except subprocess.CalledProcessError, subprocess.TimeoutExpired:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         pass
-
     try:
         result = subprocess.run(
             [
@@ -748,17 +759,6 @@ def smart_download_package(package: str):
             return
     except subprocess.TimeoutExpired:
         pass
-
-    try:
-        search = execute_command(f"flatpak search --columns=application {package}")
-        if search.strip():
-            flatpak_id = search.split("\n")[0].strip()
-            execute_command(f"flatpak install -y flathub {flatpak_id}")
-            print(f"-> {package} via flatpak ({flatpak_id}).")
-            return
-    except subprocess.CalledProcessError, subprocess.TimeoutExpired:
-        pass
-
     failed_packages.append(package)
     print(f"Error: '{package}' could not be installed.")
 
@@ -785,8 +785,6 @@ def install_aur_packages():
 
 def install_eww():
     print("\n--- Installing eww-git ---")
-    # eww-git baut über Cargo und erfordert ggf. zusätzliche Schlüssel.
-    # Durch den separierten Call wird die Standardinstallation nicht blockiert.
     yay_install("eww-git")
 
 
@@ -808,14 +806,9 @@ def install_oh_my_zsh():
             env=TOBSTER_ENV,
         )
         if result.returncode != 0:
-            print(f"oh-my-zsh stderr: {result.stderr}")
             failed_packages.append("oh-my-zsh")
         else:
             print("-> oh-my-zsh installed.")
-
-            print(
-                "-> Installing zsh plugins (autosuggestions & syntax-highlighting)..."
-            )
             execute_command(
                 "git clone https://github.com/zsh-users/zsh-autosuggestions /home/tobster/.oh-my-zsh/custom/plugins/zsh-autosuggestions",
                 as_user=True,
@@ -824,9 +817,7 @@ def install_oh_my_zsh():
                 "git clone https://github.com/zsh-users/zsh-syntax-highlighting.git /home/tobster/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting",
                 as_user=True,
             )
-
     except subprocess.TimeoutExpired:
-        print("oh-my-zsh install timed out.")
         failed_packages.append("oh-my-zsh")
 
 
@@ -880,7 +871,7 @@ def setup_system_basics():
 
 
 def setup_locale():
-    print("\nSetting system locale to English...")
+    print("\nSetting system locale and Persistent Keymap...")
     try:
         execute_command(
             "sed -i 's/#en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen"
@@ -895,20 +886,15 @@ def setup_locale():
             f.write("LC_TIME=en_US.UTF-8\n")
             f.write("LC_MESSAGES=en_US.UTF-8\n")
 
+        # Persistent Keyboard Layouts (TTY & X11)
+        execute_command("localectl set-keymap de")
+        execute_command("localectl set-x11-keymap de")
+
         execute_command("mkdir -p /home/tobster/.config/locale")
         with open("/home/tobster/.config/locale.conf", "w") as f:
             f.write("LANG=en_US.UTF-8\n")
         execute_command("chown tobster:tobster /home/tobster/.config/locale.conf")
-
-        if not os.path.exists("/etc/vconsole.conf"):
-            with open("/etc/vconsole.conf", "w") as f:
-                f.write("KEYMAP=de\n")
-        else:
-            execute_command(
-                "grep -q 'KEYMAP' /etc/vconsole.conf || echo 'KEYMAP=de' >> /etc/vconsole.conf"
-            )
-
-        print("-> System locale set to en_US.UTF-8 (keyboard layout stays German).")
+        print("-> System locale set to en_US.UTF-8 (Keyboard layout persistent in DE).")
     except Exception as e:
         print(f"Failed to set locale: {e}")
 
@@ -924,33 +910,23 @@ def setup_firewall():
         execute_command("ufw logging on")
         execute_command("ufw --force enable")
         execute_command("systemctl enable ufw.service")
-        print("-> Firewall activated and configured.")
+        print("-> Firewall activated.")
     except Exception as e:
-        print(f"Failed to setup firewall: {e}")
+        pass
 
 
 def setup_opsec():
     print("\nApplying Security Hardening (OpSec)...")
-    sysctl_conf = """# Restrict dmesg access to root
-kernel.dmesg_restrict = 1
-
-# Enable TCP syncookies (prevents SYN flood attacks)
-net.ipv4.tcp_syncookies = 1
-
-# Ignore ICMP echo requests (Ping)
-net.ipv4.icmp_echo_ignore_all = 1
-"""
+    sysctl_conf = """kernel.dmesg_restrict = 1\nnet.ipv4.tcp_syncookies = 1\nnet.ipv4.icmp_echo_ignore_all = 1\n"""
     try:
         with open("/etc/sysctl.d/99-opsec.conf", "w") as f:
             f.write(sysctl_conf)
         execute_command("sysctl --system")
-
         with open("/etc/profile.d/99-umask.sh", "w") as f:
             f.write("umask 027\n")
         execute_command("chmod +x /etc/profile.d/99-umask.sh")
-        print("-> Sysctl network limits and Umask 027 applied.")
     except Exception as e:
-        print(f"Failed to apply OpSec: {e}")
+        pass
 
 
 def picom_config():
@@ -959,11 +935,9 @@ def picom_config():
     with open(f"{config_dir}/picom.conf", "w") as f:
         f.write(picom_content)
     execute_command("chown -R tobster:tobster /home/tobster/.config/picom")
-    print("-> Picom config installed.")
 
 
 def detect_wifi_interface():
-    print("\nDetecting WiFi interface...")
     try:
         output = execute_command("ip link show")
         interface = None
@@ -976,35 +950,26 @@ def detect_wifi_interface():
             execute_command(
                 f'sed -i \'s/interface="wlan0"/interface="{interface}"/\' {config_path}'
             )
-            print(f"-> WiFi interface '{interface}' patched into qtile config.")
-        else:
-            print("-> No WiFi interface found, leaving 'wlan0' as default.")
     except subprocess.CalledProcessError:
-        print("-> Could not detect WiFi interface.")
+        pass
 
 
 def setup_cursor():
-    print("\nSetting up cursor theme...")
     gtk_dir = "/home/tobster/.config/gtk-3.0"
     execute_command(f"mkdir -p {gtk_dir}")
     with open(f"{gtk_dir}/settings.ini", "w") as f:
         f.write(gtk_settings_content)
-
     with open("/home/tobster/.gtkrc-2.0", "w") as f:
         f.write('gtk-cursor-theme-name="Bibata-Modern-Classic"\n')
         f.write("gtk-cursor-theme-size=24\n")
-
     with open("/home/tobster/.Xresources", "w") as f:
         f.write(xresources_content)
-
     execute_command("mkdir -p /usr/share/icons/default")
     with open("/usr/share/icons/default/index.theme", "w") as f:
         f.write("[Icon Theme]\nInherits=Bibata-Modern-Classic\n")
-
     execute_command("chown -R tobster:tobster /home/tobster/.config/gtk-3.0")
     execute_command("chown tobster:tobster /home/tobster/.Xresources")
     execute_command("chown tobster:tobster /home/tobster/.gtkrc-2.0")
-    print("-> Cursor theme configured (Bibata-Modern-Classic).")
 
 
 def autostart():
@@ -1017,9 +982,8 @@ def autostart():
         with open("/home/tobster/.xinitrc", "w") as f:
             f.write(xinitrc_content)
         execute_command("chmod +x /home/tobster/.xinitrc")
-        print("-> .xinitrc configured.")
     except Exception as e:
-        print(f"Failed to create .xinitrc: {e}")
+        pass
 
     postscript_dir = "/home/tobster/.config/wal/postscripts"
     execute_command(f"mkdir -p {postscript_dir}")
@@ -1032,12 +996,12 @@ def autostart():
         "ly_reload.sh": ly_wal_postscript_content,
         "gtk_wal_reload.sh": gtk_wal_postscript_content,
         "alacritty_reload.sh": alacritty_wal_postscript_content,
+        "dunst_reload.sh": dunst_wal_postscript_content,
     }
     for filename, content in scripts.items():
         with open(f"{postscript_dir}/{filename}", "w") as f:
             f.write(content)
         execute_command(f"chmod +x {postscript_dir}/{filename}")
-        print(f"-> pywal postscript '{filename}' installed.")
 
     execute_command("chown -R tobster:tobster /home/tobster")
 
@@ -1045,22 +1009,16 @@ def autostart():
 def setup_alacritty():
     config_dir = "/home/tobster/.config/alacritty"
     execute_command(f"mkdir -p {config_dir}")
-
-    # FIX: Das Script überschreibt nun hart die Alacritty Config
     with open(f"{config_dir}/alacritty.toml", "w") as f:
         f.write(alacritty_content)
-
     with open(f"{config_dir}/colors-live.toml", "w") as f:
         f.write("# Fallback empty config until pywal runs\n")
-
     template_dir = "/home/tobster/.config/wal/templates"
     execute_command(f"mkdir -p {template_dir}")
     with open(f"{template_dir}/colors-alacritty.toml", "w") as f:
         f.write(alacritty_wal_template)
-
     execute_command("chown -R tobster:tobster /home/tobster/.config/alacritty")
     execute_command("chown -R tobster:tobster /home/tobster/.config/wal")
-    print("-> Alacritty configured with pywal integration.")
 
 
 def setup_rofi():
@@ -1069,11 +1027,9 @@ def setup_rofi():
     with open(f"{config_dir}/config.rasi", "w") as f:
         f.write(rofi_content)
     execute_command(f"chown -R tobster:tobster {config_dir}")
-    print("-> Rofi configured with pywal color integration.")
 
 
 def setup_ly():
-    print("\nSetting up Ly display manager...")
     try:
         ly_config_dir = "/etc/ly"
         execute_command(f"mkdir -p {ly_config_dir}")
@@ -1081,16 +1037,14 @@ def setup_ly():
             f.write(ly_config_content)
         execute_command("systemctl disable getty@tty2.service 2>/dev/null || true")
         execute_command("systemctl enable ly@tty2.service")
-        print("-> Ly enabled on TTY2.")
     except subprocess.CalledProcessError as e:
-        print(f"Failed to setup Ly: {e}")
+        pass
 
 
 def setup_pipewire():
     service_dir = "/home/tobster/.config/systemd/user"
     wants_dir = f"{service_dir}/default.target.wants"
     execute_command(f"mkdir -p {wants_dir}")
-
     for service in [
         "pipewire.service",
         "pipewire-pulse.service",
@@ -1098,7 +1052,6 @@ def setup_pipewire():
     ]:
         execute_command(f"ln -sf /usr/lib/systemd/user/{service} {wants_dir}/{service}")
     execute_command("chown -R tobster:tobster /home/tobster/.config/systemd")
-    print("-> Pipewire enabled via symlinks.")
 
 
 def setup_zsh():
@@ -1114,9 +1067,8 @@ def setup_zsh():
         execute_command(
             "sed -i 's|\\(tobster:x:[^:]*:[^:]*:[^:]*:[^:]*:\\)/bin/bash|\\1/bin/zsh|' /etc/passwd"
         )
-        print("-> Zsh configured and set as default shell.")
     except subprocess.CalledProcessError as e:
-        print(f"Warning: Could not setup Zsh properly. Error: {e}")
+        pass
 
 
 def setup_starship():
@@ -1125,7 +1077,6 @@ def setup_starship():
     with open(f"{config_dir}/starship.toml", "w") as f:
         f.write(starship_content)
     execute_command(f"chown tobster:tobster {config_dir}/starship.toml")
-    print("-> Starship configured.")
 
 
 def load_wallpapers_to_folders():
@@ -1134,17 +1085,58 @@ def load_wallpapers_to_folders():
         "git clone https://github.com/phenax/wallpapers.git /home/tobster/.wallpapers"
     )
     execute_command("chown -R tobster:tobster /home/tobster/.wallpapers")
-    print("-> Wallpapers loaded.")
 
 
-def setup_bluetooth():
-    execute_command("systemctl enable bluetooth.service")
-    print("-> Bluetooth enabled.")
+def setup_mullvad_and_permissions():
+    print("\nSetting up Mullvad & USB Groups...")
+    try:
+        execute_command("systemctl enable mullvad-daemon.service")
+        print("-> Mullvad daemon enabled.")
+    except Exception:
+        pass
+    # TTY / ESP32 Flashing Permissions
+    execute_command("usermod -aG uucp tobster")
+    execute_command("usermod -aG dialout tobster")
+    print("-> User added to uucp and dialout groups for ESP32 flashing.")
 
 
-def setup_networkmanager():
-    execute_command("systemctl enable NetworkManager.service")
-    print("-> NetworkManager enabled.")
+def create_helper_scripts():
+    print("\nCreating Helper Scripts (Volume & Powermenu)...")
+    bin_dir = "/home/tobster/.local/bin"
+    execute_command(f"mkdir -p {bin_dir}")
+
+    vol_script = """#!/bin/bash
+case "$1" in
+    up) pactl set-sink-volume @DEFAULT_SINK@ +5% ;;
+    down) pactl set-sink-volume @DEFAULT_SINK@ -5% ;;
+    mute) pactl set-sink-mute @DEFAULT_SINK@ toggle ;;
+esac
+VOL=$(pactl get-sink-volume @DEFAULT_SINK@ | grep -Po '\\d+(?=%)' | head -n 1)
+MUTE=$(pactl get-sink-mute @DEFAULT_SINK@ | grep -i 'yes')
+if [ -n "$MUTE" ]; then
+    notify-send -h string:x-dunst-stack-tag:volume -a "Volume" "Muted"
+else
+    notify-send -h string:x-dunst-stack-tag:volume -h int:value:"$VOL" -a "Volume" "Volume: ${VOL}%"
+fi
+"""
+    power_script = """#!/bin/bash
+chosen=$(echo -e "Shutdown\\nReboot\\nSuspend\\nLogout" | rofi -dmenu -i -p "Power" -theme-str 'window {width: 300px;} listview {lines: 4;}')
+case "$chosen" in
+    *"Shutdown") systemctl poweroff ;;
+    *"Reboot") systemctl reboot ;;
+    *"Suspend") systemctl suspend ;;
+    *"Logout") qtile cmd-obj -o cmd -f shutdown ;;
+esac
+"""
+    with open(f"{bin_dir}/volume.sh", "w") as f:
+        f.write(vol_script)
+    with open(f"{bin_dir}/powermenu.sh", "w") as f:
+        f.write(power_script)
+
+    execute_command(f"chmod +x {bin_dir}/volume.sh")
+    execute_command(f"chmod +x {bin_dir}/powermenu.sh")
+    execute_command(f"chown -R tobster:tobster /home/tobster/.local")
+    print("-> Helper scripts created.")
 
 
 # <<<-----------------------------------------------------------MAIN---------------------------------------------------------->>>
@@ -1152,6 +1144,7 @@ def setup_networkmanager():
 
 def main():
     try:
+        update_mirrors()
         setup_system_basics()
         setup_opsec()
         setup_firewall()
@@ -1166,14 +1159,16 @@ def main():
         picom_config()
         load_wallpapers_to_folders()
         setup_pipewire()
-        setup_bluetooth()
-        setup_networkmanager()
+        execute_command("systemctl enable bluetooth.service")
+        execute_command("systemctl enable NetworkManager.service")
         setup_cursor()
         setup_alacritty()
         setup_rofi()
         setup_ly()
         setup_zsh()
         setup_starship()
+        setup_mullvad_and_permissions()
+        create_helper_scripts()
         autostart()
         execute_command(
             "pacman -S --needed --noconfirm python-psutil python-iwlib alsa-utils"

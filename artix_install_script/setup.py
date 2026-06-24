@@ -1,3 +1,4 @@
+import subprocess
 import os
 import subprocess
 
@@ -677,6 +678,31 @@ esac
     print("-> Helper Scripts erstellt.")
 
 
+def setup_fuzzel_template():
+    print("\n=== Fuzzel Pywal Template ===")
+    template_dir = f"{HOME}/.config/wal/templates"
+    
+    # Ordnerstruktur sicherstellen
+    run(f"mkdir -p {template_dir}")
+
+    # ACHTUNG: Hier kein f-String (kein 'f' vor den Anführungszeichen), 
+    # da Pywal die {} Klammern später selbst verarbeitet.
+    fuzzel_template = """[colors]
+background={background.strip}e6
+text={foreground.strip}ff
+match={color4.strip}ff
+selection={color4.strip}e6
+selection-text={background.strip}ff
+selection-match={color1.strip}ff
+border={color4.strip}ff
+"""
+    
+    # Datei schreiben und Rechte setzen
+    write_file(f"{template_dir}/colors-fuzzel.ini", fuzzel_template, USER)
+    print("-> Fuzzel Pywal Template erstellt.")
+
+
+
 # <<<-----------------------------------------------------------MAIN---------------------------------------------------------->>>
 
 def main():
@@ -700,6 +726,7 @@ def main():
         setup_zsh()
         setup_wallpapers()
         setup_mullvad()
+        setup_fuzzel_template()
         create_helper_scripts()
 
     finally:

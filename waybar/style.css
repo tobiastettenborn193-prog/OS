@@ -1,0 +1,97 @@
+/* Globale Einstellungen */
+* {
+    font-family: "JetBrainsMono Nerd Font", sans-serif;
+    font-size: 14px;
+    font-weight: bold;
+    min-height: 0;
+    border: none;
+    box-shadow: none;
+}
+
+/* Der Bar-Hintergrund (1a1a2e = dunkles Blau/Grau, 0.8 = 80% Opacity) */
+window#waybar {
+    background-color: rgba(26, 26, 46, 0.8);
+    color: #cdd6f4;
+}
+
+/* Gemeinsames Styling für alle Module */
+#custom-os_logo,
+#workspaces,
+#clock,
+#pulseaudio,
+#memory,
+#cpu,
+#tray,
+#custom-power {
+    padding: 0px 14px;
+    margin: 4px 6px;
+    border-radius: 12px;
+    background-color: rgba(255, 255, 255, 0.05);
+    color: #cdd6f4;
+    transition: all 0.2s ease-in-out;
+}
+
+/* Hover-Effekte für interaktive Module */
+#custom-os_logo:hover,
+#clock:hover,
+#pulseaudio:hover,
+#custom-power:hover {
+    background-color: rgba(255, 255, 255, 0.15);
+    color: #89b4fa; /* Leichtes Blau beim Hovern */
+    cursor: pointer;
+}
+
+/* Artix Logo spezifisch */
+#custom-os_logo {
+    color: #89b4fa;
+    font-size: 18px;
+    padding-right: 18px;
+    padding-left: 14px;
+}
+
+/* Niri Workspaces */
+#workspaces {
+    padding: 0px 6px;
+}
+
+#workspaces button {
+    padding: 0px 8px;
+    color: #6c7086;
+    transition: all 0.2s ease-in-out;
+}
+
+#workspaces button.active {
+    color: #89b4fa;
+}
+
+#workspaces button:hover {
+    color: #cdd6f4;
+    background: transparent;
+    text-shadow: 0 0 5px rgba(255, 255, 255, 0.3);
+}
+
+/* Spezifische Farben für System-Stats zur besseren Lesbarkeit */
+#memory {
+    color: #a6e3a1; /* Grünlich */
+}
+
+#cpu {
+    color: #fab387; /* Orange */
+}
+
+#custom-power {
+    color: #f38ba8; /* Rot */
+    padding-right: 18px;
+    padding-left: 14px;
+    margin-right: 10px;
+}
+
+#custom-power:hover {
+    background-color: #f38ba8;
+    color: #11111b;
+}
+
+/* Tray / Systray */
+#tray {
+    background-color: transparent;
+}

@@ -1,0 +1,134 @@
+// ~/.config/niri/config.kdl
+
+// === Autostart Programme ===
+// Diese Programme starten automatisch, wenn Niri hochfährt.
+spawn-at-startup "xwayland-satellite"
+spawn-at-startup "waybar"
+spawn-at-startup "mako"
+spawn-at-startup "swaybg" "-i" "/home/tobster/.wallpapers/121.png" "-m" "fill"
+spawn-at-startup "/usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1"
+
+// === Input & Tastatur ===
+input {
+    keyboard {
+        xkb {
+            layout "de"
+        }
+    }
+    touchpad {
+        tap
+        natural-scroll
+        dwt
+    }
+    mouse {
+        accel-profile "flat"
+    }
+}
+
+// === Layout & Optik ===
+layout {
+    gaps 12
+    center-focused-column "never"
+
+    // Standard-Breite für neue Fenster
+    default-column-width { proportion 0.5; }
+
+    // Der Rahmen um das aktive Fenster (Fokus-Ring)
+    focus-ring {
+        width 2
+        active-color "#89b4fa" // Ein sattes Blau passend zur Waybar
+        inactive-color "#1e1e2e"
+    }
+
+    border {
+        off
+    }
+}
+
+// === Fenster-Regeln ===
+// Wir wollen, dass Waybar und Fuzzel keine Rahmen bekommen und richtig behandelt werden
+window-rule {
+    match app-id="waybar"
+    match app-id="fuzzel"
+    draw-border-with-background false
+    focus-ring { off; }
+}
+
+// === Animationen ===
+animations {
+    // Weiche, schnelle Animationen
+    slowdown 1.0
+    workspace-switch {
+        spring damping-ratio=1.0 stiffness=1000 epsilon=0.0001
+    }
+    window-open {
+        duration-ms 150
+        curve "ease-out-expo"
+    }
+}
+
+// === Keybindings ===
+binds {
+    // Mod-Taste ist die Windows/Super-Taste
+    Mod+Return { spawn "alacritty"; }
+    Mod+Space { spawn "fuzzel"; }
+    Mod+Escape { spawn "/home/tobster/.local/bin/powermenu.sh"; }
+    
+    // Niri beenden (Logout)
+    Mod+Shift+Q { quit; }
+    
+    // Fenster schließen
+    Mod+k { close-window; }
+
+    // Medien-Tasten (Lautstärke über dein Helper-Script)
+    XF86AudioRaiseVolume allow-when-locked=true { spawn "/home/tobster/.local/bin/volume.sh" "up"; }
+    XF86AudioLowerVolume allow-when-locked=true { spawn "/home/tobster/.local/bin/volume.sh" "down"; }
+    XF86AudioMute        allow-when-locked=true { spawn "/home/tobster/.local/bin/volume.sh" "mute"; }
+    
+    // Helligkeit
+    XF86MonBrightnessUp   allow-when-locked=true { spawn "brightnessctl" "s" "5%+"; }
+    XF86MonBrightnessDown allow-when-locked=true { spawn "brightnessctl" "s" "5%-"; }
+
+    // Niri Navigation (Vim-Style oder Pfeiltasten)
+    Mod+Left  { focus-column-left; }
+    Mod+Down  { focus-window-down; }
+    Mod+Up    { focus-window-up; }
+    Mod+Right { focus-column-right; }
+    Mod+A   { focus-column-left; }
+    Mod+S   { focus-window-down; }
+    Mod+W  { focus-window-up; }
+    Mod+D     { focus-column-right; }
+
+    // Fenster verschieben
+    Mod+Shift+Left  { move-column-left; }
+    Mod+Shift+Down  { move-window-down; }
+    Mod+Shift+Up    { move-window-up; }
+    Mod+Shift+Right { move-column-right; }
+    Mod+Shift+A     { move-column-left; }
+    Mod+Shift+S     { move-window-down; }
+    Mod+Shift+W     { move-window-up; }
+    Mod+Shift+D     { move-column-right; }
+
+    // Ansicht vergrößern/verkleinern
+    Mod+Minus { set-column-width "-10%"; }
+    Mod+Plus  { set-column-width "+10%"; }
+    Mod+F     { maximize-column; }
+    Mod+Shift+F { fullscreen-window; }
+
+    // Workspaces wechseln
+    Mod+1 { focus-workspace 1; }
+    Mod+2 { focus-workspace 2; }
+    Mod+3 { focus-workspace 3; }
+    Mod+4 { focus-workspace 4; }
+    Mod+5 { focus-workspace 5; }
+
+    // Fenster auf Workspace verschieben
+    Mod+Shift+1 { move-column-to-workspace 1; }
+    Mod+Shift+2 { move-column-to-workspace 2; }
+    Mod+Shift+3 { move-column-to-workspace 3; }
+    Mod+Shift+4 { move-column-to-workspace 4; }
+    Mod+Shift+5 { move-column-to-workspace 5; }
+
+    // Screenshots
+    Alt+P { spawn "sh" "-c" "grim -g \"$(slurp)\" - | wl-copy"; }
+}

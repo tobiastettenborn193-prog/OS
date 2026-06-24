@@ -1,7 +1,7 @@
 [project]
-name = "qtile"
+name = "artix-install-script"
 version = "0.1.0"
-description = "This is my custom qtile configuration"
+description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = []

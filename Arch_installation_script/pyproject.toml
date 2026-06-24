@@ -1,7 +1,0 @@
-[project]
-name = "arch-installation-script"
-version = "0.1.0"
-description = "My personal arch installation script, just covers the base installation and some basic configuration."
-readme = "README.md"
-requires-python = ">=3.14"
-dependencies = []
